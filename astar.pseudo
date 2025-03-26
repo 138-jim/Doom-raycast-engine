@@ -1,0 +1,112 @@
+Class PathNode:
+    Initialize(x, y, parent = null):
+        this.x = x
+        this.y = y
+        this.parent = parent
+        this.g = 0  // Cost from start to this node
+        this.h = 0  // Heuristic (estimated cost to goal)
+        this.f = 0  // Total cost (g + h)
+
+Function A_Star_Pathfinding(start_x, start_y, goal_x, goal_y, max_iterations = 1000):
+    // Convert coordinates to grid positions
+    start_grid_x = floor(start_x / TILE_SIZE)
+    start_grid_y = floor(start_y / TILE_SIZE)
+    goal_grid_x = floor(goal_x / TILE_SIZE)
+    goal_grid_y = floor(goal_y / TILE_SIZE)
+    
+    // Check if start or goal is invalid
+    if MAP[start_grid_y][start_grid_x] is wall or MAP[goal_grid_y][goal_grid_x] is wall:
+        return empty_path
+    
+    // Define possible movement directions (including diagonals)
+    directions = [
+        (0, -1),  // up
+        (1, -1),  // up-right
+        (1, 0),   // right
+        (1, 1),   // down-right
+        (0, 1),   // down
+        (-1, 1),  // down-left
+        (-1, 0),  // left
+        (-1, -1)  // up-left
+    ]
+    
+    // Initialize open and closed lists
+    open_list = new PriorityQueue()
+    closed_set = new Set()
+    
+    // Create start and goal nodes
+    start_node = new PathNode(start_grid_x, start_grid_y)
+    goal_node = new PathNode(goal_grid_x, goal_grid_y)
+    
+    // Set heuristic for start node (Manhattan distance)
+    start_node.h = |start_node.x - goal_node.x| + |start_node.y - goal_node.y|
+    start_node.f = start_node.h
+    
+    // Add start node to open list
+    open_list.push(start_node)
+    
+    iterations = 0
+    
+    // Main loop
+    while open_list is not empty and iterations < max_iterations:
+        iterations = iterations + 1
+        
+        // Get node with lowest f score
+        current_node = open_list.pop()
+        
+        // Check if reached goal
+        if current_node.x equals goal_node.x and current_node.y equals goal_node.y:
+            // Reconstruct path
+            path = new List()
+            while current_node is not null:
+                // Convert back to world coordinates
+                path.add((current_node.x * TILE_SIZE + TILE_SIZE/2, 
+                          current_node.y * TILE_SIZE + TILE_SIZE/2))
+                current_node = current_node.parent
+            return reverse(path)  // Return path from start to goal
+        
+        // Add current node to closed set
+        closed_set.add((current_node.x, current_node.y))
+        
+        // Check all adjacent nodes
+        for each (dx, dy) in directions:
+            // Calculate new position
+            new_x = current_node.x + dx
+            new_y = current_node.y + dy
+            
+            // Check if position is valid
+            if new_x is in range(0, MAP_WIDTH) and 
+               new_y is in range(0, MAP_HEIGHT) and
+               MAP[new_y][new_x] is not wall and
+               (new_x, new_y) is not in closed_set:
+                
+                // Create neighbor node
+                neighbor = new PathNode(new_x, new_y, current_node)
+                
+                // Calculate g score (cost from start)
+                if dx != 0 and dy != 0:
+                    // Check if diagonal path is blocked by walls
+                    if MAP[current_node.y][new_x] is wall or MAP[new_y][current_node.x] is wall:
+                        continue  // Skip this neighbor
+                    neighbor.g = current_node.g + 1.414  // √2 for diagonal movement
+                else:
+                    neighbor.g = current_node.g + 1  // Cost for orthogonal movement
+                
+                // Calculate h score (Manhattan distance heuristic)
+                neighbor.h = |neighbor.x - goal_node.x| + |neighbor.y - goal_node.y|
+                
+                // Calculate f score (total cost)
+                neighbor.f = neighbor.g + neighbor.h
+                
+                // Check if a better path to this node already exists in open list
+                better_node_exists = false
+                for each open_node in open_list:
+                    if open_node equals neighbor and open_node.g <= neighbor.g:
+                        better_node_exists = true
+                        break
+                
+                if not better_node_exists:
+                    open_list.push(neighbor)
+    
+    // No path found
+    return empty_path
