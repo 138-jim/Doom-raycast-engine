@@ -2,7 +2,6 @@
 
 A Python-based raycasting engine inspired by classic first-person shooters like Doom and Wolfenstein 3D. This project implements a fully-featured game with raycasting techniques, enemy AI with A* pathfinding, weapon mechanics, and game state management.
 
-![Game Screenshot Placeholder](placeholder_for_screenshot.png)
 
 ## Features
 
@@ -156,12 +155,9 @@ Extend the `Enemy` class or create subclasses with different behaviors and prope
 ## Credits
 
 - Raycasting engine inspired by [Lode's Raycasting Tutorial](https://lodev.org/cgtutor/raycasting.html)
-- A* pathfinding algorithm based on standard implementations
+- A* pathfinding algorithm based on standard implementations [Stanford's A*](https://theory.stanford.edu/~amitp/GameProgramming/AStarComparison.html)
 
 ## License
 
 This project is open-source and available under the MIT License.
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
