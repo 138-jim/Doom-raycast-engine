@@ -9,7 +9,11 @@ const PLAYER_SIZE = 10;
 const RAY_COUNT = Math.floor(SCREEN_WIDTH / 4); // Number of rays to cast (performance adjusted)
 const WALL_HEIGHT = 50;
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 const WALL_STRIP_WIDTH = Math.max(1, Math.ceil(SCREEN_WIDTH / RAY_COUNT)); // Ensure no gaps between strips and minimum width of 1px
+=======
+const WALL_STRIP_WIDTH = Math.ceil(4); // Ensure no gaps between strips
+>>>>>>> Stashed changes
 =======
 const WALL_STRIP_WIDTH = Math.ceil(4); // Ensure no gaps between strips
 >>>>>>> Stashed changes
