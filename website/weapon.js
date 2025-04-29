@@ -180,6 +180,18 @@ class AudioManager {
                 } else {
                     this.sounds[name].volume = this.volumes.master * this.volumes.sfx;
                 }
+                
+                // Pre-load sound by loading but keeping muted
+                const sound = this.sounds[name];
+                sound.muted = true;
+                sound.play().then(() => {
+                    sound.pause();
+                    sound.currentTime = 0;
+                    sound.muted = false;
+                }).catch(e => {
+                    // This is expected for some browsers
+                    sound.muted = false;
+                });
             } catch (error) {
                 console.warn(`Could not load sound: ${name}`, error);
             }
@@ -187,6 +199,14 @@ class AudioManager {
         
         // Store music separately for easier control
         this.music = this.sounds.menuMusic;
+        
+        // Flag that audio is now activated
+        this.audioActivated = true;
+        
+        // If music should be playing, try again now
+        if (this.musicShouldPlay && this.music && !this.music.paused) {
+            this.playMusic();
+        }
     }
     
     // Play a sound effect
@@ -216,11 +236,26 @@ class AudioManager {
     // Play background music
     playMusic() {
         if (this.music) {
-            this.music.volume = this.volumes.master * this.volumes.music;
-            this.music.currentTime = 0;
-            this.music.play().catch(error => {
-                console.warn("Could not play music", error);
-            });
+            // Only try to play music if the document has received user interaction
+            // Store that we want music to play, and it will be started on user interaction
+            this.musicShouldPlay = true;
+            
+            try {
+                this.music.volume = this.volumes.master * this.volumes.music;
+                this.music.currentTime = 0;
+                
+                // Check if the browser allows autoplay
+                const playPromise = this.music.play();
+                
+                if (playPromise !== undefined) {
+                    playPromise.catch(error => {
+                        console.log("Music will play after user interaction");
+                        // We'll handle this in the click/keydown event
+                    });
+                }
+            } catch (error) {
+                console.log("Music will play after user interaction");
+            }
         }
     }
     
