@@ -30,6 +30,11 @@ class Game {
         this.frameCount = 0;
         this.fpsUpdateTime = 0;
         
+        // Game loop optimization variables
+        this.accumulatedTime = 0;
+        this.unfocusedTime = 0;
+        this.lastFocused = true;
+        
         // Mouse movement
         this.mouseDx = 0;
         
@@ -337,6 +342,12 @@ class Game {
         if (elapsed >= 1000) { // Update every second
             this.fps = Math.round(this.frameCount * 1000 / elapsed);
             this.fpsCounter.textContent = `FPS: ${this.fps}`;
+            
+            // Update raycaster's adaptive resolution based on current FPS
+            if (this.raycaster && typeof this.raycaster.updateAdaptiveResolution === 'function') {
+                this.raycaster.updateAdaptiveResolution(this.fps);
+            }
+            
             this.frameCount = 0;
             this.fpsUpdateTime = performance.now();
         }
@@ -353,7 +364,7 @@ class Game {
         }
     }
     
-    // Main game loop
+    // Main game loop with optimizations
     gameLoop(timestamp) {
         // Calculate delta time
         this.deltaTime = (timestamp - this.lastTime) / 1000; // In seconds
@@ -362,11 +373,42 @@ class Game {
         // Prevent extreme delta times (e.g. after tab switch)
         if (this.deltaTime > 0.1) this.deltaTime = 0.016; // Cap at ~60fps
         
-        // Update game state
-        this.update();
-        
-        // Render game
-        this.render();
+        // Skip updating the game if the tab is not focused - power saving
+        if (document.hasFocus() || !this.lastFocused) {
+            // Track when we last processed a frame with focus
+            this.lastFocused = true;
+            
+            // Optimize for 60fps - only update game logic at ~60fps
+            // but allow rendering at higher rates for smoother visuals
+            this.accumulatedTime += this.deltaTime;
+            const tickRate = 1/60; // Fixed time step (60 fps)
+            
+            // Process all accumulated time in fixed steps
+            while (this.accumulatedTime >= tickRate) {
+                // Update game state at a fixed rate
+                this.update();
+                this.accumulatedTime -= tickRate;
+                
+                // Avoid spiral of death (when updates take longer than framerate allows)
+                if (this.accumulatedTime > tickRate * 3) {
+                    this.accumulatedTime = 0;
+                    break;
+                }
+            }
+            
+            // Render at full speed
+            this.render();
+        } else {
+            // Tab not focused - only render at 10fps to save power
+            this.lastFocused = false;
+            const lowPowerInterval = 1/10; // 10fps when not focused
+            
+            this.unfocusedTime += this.deltaTime;
+            if (this.unfocusedTime >= lowPowerInterval) {
+                this.unfocusedTime = 0;
+                this.render();
+            }
+        }
         
         // Continue the loop
         this.animationId = requestAnimationFrame(timestamp => this.gameLoop(timestamp));
