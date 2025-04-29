@@ -8,7 +8,7 @@ const TILE_SIZE = 64;
 const PLAYER_SIZE = 10;
 const RAY_COUNT = Math.floor(SCREEN_WIDTH / 4); // Number of rays to cast (performance adjusted)
 const WALL_HEIGHT = 50;
-const WALL_STRIP_WIDTH = Math.ceil(SCREEN_WIDTH / RAY_COUNT); // Ensure no gaps between strips
+const WALL_STRIP_WIDTH = Math.ceil(SCREEN_WIDTH / RAY_COUNT) * 4; // Ensure no gaps between strips
 
 // Weapon settings
 const WEAPON_IDLE_POS = 0;
@@ -35,7 +35,7 @@ const WALL_HEIGHT_LIMIT = SCREEN_HEIGHT * 2.5; // Maximum wall height to prevent
 const LOD_ENABLED = true; // Level of Detail for close walls/sprites
 const MAX_SPRITE_SIZE = SCREEN_HEIGHT * 1.2; // Maximum size for enemy sprites
 const MINIMUM_WALL_DISTANCE = 0.1; // Prevent division by zero and extreme wall heights
-const RENDER_DISTANCE_CLOSE = 1.0; // Distance threshold for close rendering
+const RENDER_DISTANCE_CLOSE = 3.0; // Distance threshold for close rendering
 const RENDER_DISTANCE_MID = 3.0; // Distance threshold for medium rendering
 
 // Player health settings
