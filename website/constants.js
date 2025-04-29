@@ -6,9 +6,9 @@ const HALF_FOV = FOV / 2;
 const MAX_DEPTH = 20; // Maximum rendering distance
 const TILE_SIZE = 64;
 const PLAYER_SIZE = 10;
-const RAY_COUNT = Math.floor(SCREEN_WIDTH / 4); // Number of rays to cast (performance adjusted)
+const RAY_COUNT = Math.floor(SCREEN_WIDTH / 2); // Number of rays to cast (performance adjusted)
 const WALL_HEIGHT = 50;
-const WALL_STRIP_WIDTH = Math.ceil(SCREEN_WIDTH / RAY_COUNT) / 4; // Ensure no gaps between strips
+const WALL_STRIP_WIDTH = Math.ceil(SCREEN_WIDTH / RAY_COUNT); // Ensure no gaps between strips
 
 // Weapon settings
 const WEAPON_IDLE_POS = 0;
