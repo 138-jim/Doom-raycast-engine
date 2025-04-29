@@ -9,12 +9,11 @@ class Raycaster {
         this.resize();
         
         // Performance settings
-        this.skipRays = 1; // Render every nth ray (default: render all rays)
+        this.skipRays = 1; // Render every nth ray
         this.quality = 1; // Rendering quality multiplier (lower for better performance)
         this.adaptiveResolution = true; // Enable adaptive resolution based on FPS
-        this.targetFPS = 45; // Target FPS for adaptive resolution (lowered to prioritize quality)
+        this.targetFPS = 60; // Target FPS for adaptive resolution
         this.currentFPS = 60; // Current FPS
-        this.maxRaySkip = 1; // Limit how many rays we can skip (to keep walls solid)
         
         // Pre-allocate buffers for better performance
         this.wallImageData = this.ctx.createImageData(1, this.canvas.height);
@@ -119,25 +118,14 @@ class Raycaster {
         
         this.currentFPS = currentFPS;
         
-        // Adjust skip rays based on FPS, but be more conservative
-        if (currentFPS < this.targetFPS * 0.8) {
+        // Adjust skip rays based on FPS
+        if (currentFPS < this.targetFPS * 0.7) {
             // FPS is too low, increase skipRays (lower resolution)
-            // But do it more gradually and respect maximum value
-            if (this.skipRays < this.maxRaySkip) {
-                this.skipRays += 0.5; // Increase more gradually
-                this.skipRays = Math.min(this.maxRaySkip, Math.floor(this.skipRays));
-            }
+            this.skipRays = Math.min(4, this.skipRays + 1);
         } else if (currentFPS > this.targetFPS * 1.2 && this.skipRays > 1) {
             // FPS is good, decrease skipRays (higher resolution)
             this.skipRays = Math.max(1, this.skipRays - 1);
         }
-        
-        // Always ensure wall strips are drawn properly
-        const rayStep = this.skipRays;
-        const stripWidth = WALL_STRIP_WIDTH * this.quality;
-        
-        // Log current settings for debugging
-        console.log(`FPS: ${currentFPS}, Ray skip: ${this.skipRays}, Strip width: ${stripWidth}`);
     }
     
     // Cast rays and render the 3D scene
@@ -310,29 +298,18 @@ class Raycaster {
                     // Get image data for the vertical strip
                     this.wallImageData.data.set(this.wallBuffer.subarray(0, stripHeight * 4));
                     
-                    // Ensure wall strips are wide enough to avoid transparent gaps
-                    const effectiveStripWidth = Math.max(5, stripWidth);
-                    
-                    // Create a full-width strip for the entire ray span
-                    const fullStripWidth = effectiveStripWidth * rayStep;
-                    
-                    // Draw a single wide strip for better performance and appearance
-                    const x = ray * stripWidth;
-                    
-                    // Stretch the 1px image data to fill the entire strip width
-                    this.ctx.putImageData(
-                        this.wallImageData, 
-                        x, drawStart, 
-                        0, 0, 
-                        1, stripHeight
-                    );
-                    
-                    // Then use drawImage to stretch it efficiently
-                    this.ctx.drawImage(
-                        this.ctx.canvas,
-                        x, drawStart, 1, stripHeight,  // source
-                        x, drawStart, fullStripWidth, stripHeight  // destination
-                    );
+                    // Batch render strips for the same ray step (fill in gaps)
+                    for (let i = 0; i < rayStep; i++) {
+                        if (ray + i < RAY_COUNT) {
+                            const x = (ray + i) * stripWidth;
+                            this.ctx.putImageData(
+                                this.wallImageData, 
+                                x, drawStart, 
+                                0, 0, 
+                                stripWidth, stripHeight
+                            );
+                        }
+                    }
                 }
             }
         }
