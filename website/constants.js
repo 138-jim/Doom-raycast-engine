@@ -8,7 +8,7 @@ const TILE_SIZE = 64;
 const PLAYER_SIZE = 10;
 const RAY_COUNT = Math.floor(SCREEN_WIDTH / 4); // Number of rays to cast (performance adjusted)
 const WALL_HEIGHT = 50;
-const WALL_STRIP_WIDTH = Math.ceil(SCREEN_WIDTH / RAY_COUNT); // Ensure no gaps between strips
+const WALL_STRIP_WIDTH = Math.max(1, Math.ceil(SCREEN_WIDTH / RAY_COUNT)); // Ensure no gaps between strips and minimum width of 1px
 
 // Weapon settings
 const WEAPON_IDLE_POS = 0;
