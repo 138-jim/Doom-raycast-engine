@@ -98,12 +98,35 @@ class Game {
         document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
         
         // Button events
-        this.buttons.start.addEventListener('click', () => this.startGame());
-        this.buttons.options.addEventListener('click', () => this.setState(GameState.OPTIONS));
+        this.buttons.start.addEventListener('click', () => {
+            this.startGame();
+            this.audioManager.activateAudio(); // Ensure audio works after user interaction
+        });
+        this.buttons.options.addEventListener('click', () => {
+            this.setState(GameState.OPTIONS);
+            this.audioManager.activateAudio(); // Ensure audio works after user interaction
+        });
         this.buttons.quit.addEventListener('click', () => this.quit());
         this.buttons.back.addEventListener('click', () => this.setState(GameState.MAIN_MENU));
         this.buttons.restart.addEventListener('click', () => this.startGame());
         this.buttons.menu.addEventListener('click', () => this.setState(GameState.MAIN_MENU));
+        
+        // Add a global click/keydown handler to enable audio
+        const enableAudio = () => {
+            if (this.audioManager) {
+                this.audioManager.activateAudio();
+                // If music should be playing but isn't, start it now
+                if (this.audioManager.musicShouldPlay && this.state === GameState.MAIN_MENU) {
+                    this.audioManager.playMusic();
+                }
+            }
+            // Remove the event listeners once audio is activated
+            document.removeEventListener('click', enableAudio);
+            document.removeEventListener('keydown', enableAudio);
+        };
+        
+        document.addEventListener('click', enableAudio);
+        document.addEventListener('keydown', enableAudio);
         
         // Volume sliders
         for (const [type, slider] of Object.entries(this.sliders)) {
@@ -199,8 +222,8 @@ class Game {
         // Transition to menu after loading
         setTimeout(() => {
             this.setState(GameState.MAIN_MENU);
-            this.audioManager.activateAudio();
-            this.audioManager.playMusic();
+            // Mark music as ready to play, but actual playback will happen after user interaction
+            this.audioManager.musicShouldPlay = true;
         }, 500);
     }
     

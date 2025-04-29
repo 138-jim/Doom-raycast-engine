@@ -241,13 +241,29 @@ class Raycaster {
         // Convert player's angle to radians
         const playerAngleRad = player.angle * Math.PI / 180;
         
-        // Sort enemies by distance (render far to near for proper occlusion)
-        const enemiesWithDist = enemies.map(enemy => {
-            const dx = enemy.x - player.x;
-            const dy = enemy.y - player.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            return { enemy, dist };
-        });
+        let enemiesWithDist = [];
+        
+        // Check if enemies is an EnemyManager or an array
+        if (enemies && enemies.enemies && Array.isArray(enemies.enemies)) {
+            // It's an EnemyManager with an enemies array
+            enemiesWithDist = enemies.enemies.map(enemy => {
+                const dx = enemy.x - player.x;
+                const dy = enemy.y - player.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                return { enemy, dist };
+            });
+        } else if (Array.isArray(enemies)) {
+            // It's already an array of enemies
+            enemiesWithDist = enemies.map(enemy => {
+                const dx = enemy.x - player.x;
+                const dy = enemy.y - player.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                return { enemy, dist };
+            });
+        } else {
+            // No valid enemies to render
+            return;
+        }
         
         // Sort by distance (far to near)
         enemiesWithDist.sort((a, b) => b.dist - a.dist);
