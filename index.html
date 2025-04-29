@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Doom Raycaster</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div id="ui-overlay">
+            <div class="health-container">
+                <div id="health-bar"></div>
+                <span id="health-text">HEALTH: 100</span>
+            </div>
+            <div id="ammo-container">
+                <span id="ammo-text">AMMO: 12/12</span>
+            </div>
+            <div id="score-container">
+                <span id="score-text">SCORE: 0</span>
+            </div>
+            <div id="fps-counter">FPS: 0</div>
+        </div>
+        
+        <div id="menu-screen" class="screen">
+            <h1>FPS RAYCASTER</h1>
+            <h3>A JavaScript Raycaster Engine</h3>
+            <button id="start-button">START GAME</button>
+            <button id="options-button">OPTIONS</button>
+            <button id="quit-button">QUIT</button>
+            <div class="version">v1.0.0</div>
+        </div>
+        
+        <div id="options-screen" class="screen hidden">
+            <h1>OPTIONS</h1>
+            <div class="slider-container">
+                <label for="master-volume">Master Volume: <span id="master-volume-value">70%</span></label>
+                <input type="range" id="master-volume" min="0" max="100" value="70" class="slider">
+            </div>
+            <div class="slider-container">
+                <label for="sfx-volume">SFX Volume: <span id="sfx-volume-value">50%</span></label>
+                <input type="range" id="sfx-volume" min="0" max="100" value="50" class="slider">
+            </div>
+            <div class="slider-container">
+                <label for="music-volume">Music Volume: <span id="music-volume-value">50%</span></label>
+                <input type="range" id="music-volume" min="0" max="100" value="50" class="slider">
+            </div>
+            <button id="back-button">BACK</button>
+        </div>
+        
+        <div id="game-over-screen" class="screen hidden">
+            <h1>GAME OVER</h1>
+            <h2 id="final-score">Final Score: 0</h2>
+            <button id="restart-button">RESTART</button>
+            <button id="menu-button">MAIN MENU</button>
+        </div>
+        
+        <div id="loading-screen" class="screen">
+            <h1>LOADING...</h1>
+            <div class="progress-bar">
+                <div id="progress"></div>
+            </div>
+        </div>
+        
+        <div id="controls-text">WASD: Move | Mouse: Look | Click: Shoot | R: Reload | ESC: Menu</div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="constants.js"></script>
+    <script src="textures.js"></script>
+    <script src="player.js"></script>
+    <script src="weapon.js"></script>
+    <script src="enemy.js"></script>
+    <script src="raycaster.js"></script>
+    <script src="pathfinding.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>

@@ -1,7 +1,28 @@
-# Python Doom-Style Raycaster
+# Doom-Style Raycaster
 
-A Python-based raycasting engine inspired by classic first-person shooters like Doom and Wolfenstein 3D. This project implements a fully-featured game with raycasting techniques, enemy AI with A* pathfinding, weapon mechanics, and game state management.
+A raycasting engine inspired by classic first-person shooters like Doom and Wolfenstein 3D. This project implements a fully-featured game with raycasting techniques, enemy AI with A* pathfinding, weapon mechanics, and game state management.
 
+## Web Version
+
+A JavaScript version of the game is now available for playing directly in your browser without any installation required.
+
+### Running the Web Version
+
+1. Open the `index.html` file in your web browser.
+2. Click "START GAME" to begin playing.
+3. First click on the game screen to enable mouse capture for looking around.
+
+### Browser Compatibility
+
+The web version works best in modern browsers:
+- Chrome
+- Firefox
+- Edge
+- Safari (latest versions)
+
+## Python Version
+
+The original Python implementation is also available in this repository.
 
 ## Features
 
@@ -15,19 +36,19 @@ A Python-based raycasting engine inspired by classic first-person shooters like 
 - Performance optimizations for smooth gameplay
 - Sound effects and visual feedback systems
 
-## Requirements
+## Python Requirements
 
 - Python 3.6+
 - pygame
 - NumPy
 - Optional: numba (for performance optimizations)
 
-## Installation
+## Python Installation
 
 1. Clone this repository:
    ```
-   git clone https://github.com/yourusername/python-doom-raycaster.git
-   cd python-doom-raycaster
+   git clone https://github.com/yourusername/doom-raycast-engine.git
+   cd doom-raycast-engine
    ```
 
 2. Install the required dependencies:
@@ -54,7 +75,6 @@ A Python-based raycasting engine inspired by classic first-person shooters like 
 - **Left Mouse Button / Space** - Shoot
 - **R** - Reload weapon
 - **P** - Toggle enemy path display on minimap
-- **Tab** - Toggle mouse capture
 - **Esc** - Return to menu (during gameplay) or quit (in menu)
 
 ### Gameplay Tips
@@ -91,27 +111,36 @@ Enemies use the A* pathfinding algorithm to navigate to the player:
 - Level of Detail (LOD) techniques for close walls
 - Enemy spawning with path validation
 - Efficient texture mapping with bit masking
-- Optional numba JIT compilation for critical functions
+- Optional numba JIT compilation for critical functions (Python version)
+- Dynamic resolution scaling (Web version)
 
 ## Project Structure
 
 ```
-python-doom-raycaster/
-├── doom.py           # Main game file
-├── astar.py          # A* pathfinding implementation
+doom-raycast-engine/
+├── doom.py           # Main Python game file
+├── doomraycastengine.py # Simplified Python raycaster
+├── astar.py          # A* pathfinding implementation (Python)
 ├── astar.pseudo      # Pseudocode documentation for pathfinding
+│
+├── index.html        # Web version entry point
+├── style.css         # Web styling
+├── constants.js      # Game constants and settings
+├── game.js           # Main game loop and state management
+├── player.js         # Player logic
+├── enemy.js          # Enemy AI and management
+├── weapon.js         # Weapon mechanics
+├── raycaster.js      # Core rendering engine
+├── pathfinding.js    # A* implementation for JS
+├── textures.js       # Texture management
+│
 ├── sounds/           # Game sound effects
-│   ├── gun_fire.wav
-│   ├── gun_empty.wav
-│   ├── gun_reload.wav
-│   ├── button_click.wav
-│   ├── button_hover.wav
-│   └── menu_music.wav
 └── README.md         # This file
 ```
 
 ## Core Classes
 
+### Python Version
 - **Player**: Manages player position, movement, and health
 - **Gun**: Handles weapon mechanics and rendering
 - **Enemy**: Individual enemy entities with pathfinding and behaviors
@@ -120,33 +149,29 @@ python-doom-raycaster/
 - **MainMenu/OptionsMenu**: User interface management
 - **Button**: Interactive UI elements
 
+### Web Version
+- **Game**: Main game loop and state management
+- **Player**: Player movement and state
+- **Weapon**: Weapon mechanics and rendering
+- **Enemy/EnemyManager**: Enemy behavior and spawning
+- **Raycaster**: 3D rendering engine
+- **Pathfinding**: A* implementation
+- **TextureManager**: Handles texture creation and access
+- **AudioManager**: Sound effect and music management
+
 ## Extending the Game
 
 ### Adding New Weapons
 
-Modify the `Gun` class to include new weapon types with different properties:
-
-```python
-class Gun:
-    def __init__(self, gun_type="pistol"):
-        self.gun_type = gun_type
-        # Set properties based on gun type
-        if gun_type == "pistol":
-            self.ammo = 12
-            self.damage = 1
-        elif gun_type == "shotgun":
-            self.ammo = 8
-            self.damage = 3
-        # ...
-```
+Modify the `Gun`/`Weapon` class to include new weapon types with different properties.
 
 ### Creating New Maps
 
 The game map is defined as a 2D array where:
 - `0` represents empty space
-- `1` represents walls
+- `1` or higher represents walls (different values can be different textures)
 
-You can create new maps by modifying the `MAP` variable in `doom.py`.
+You can create new maps by modifying the `MAP` variable in `doom.py` or `constants.js`.
 
 ### Adding New Enemy Types
 
@@ -160,4 +185,3 @@ Extend the `Enemy` class or create subclasses with different behaviors and prope
 ## License
 
 This project is open-source and available under the MIT License.
-
