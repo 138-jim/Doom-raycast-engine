@@ -19,6 +19,13 @@ class Raycaster {
         this.wallImageData = this.ctx.createImageData(1, this.canvas.height);
         this.wallBuffer = new Uint8ClampedArray(this.wallImageData.data.buffer);
         
+        // Create a reusable wall strip canvas (to avoid creating new canvases every frame)
+        this.stripCanvas = document.createElement('canvas');
+        this.stripCanvas.width = WALL_STRIP_WIDTH;
+        this.stripCanvas.height = this.canvas.height;
+        this.stripCtx = this.stripCanvas.getContext('2d');
+        this.stripCtx.imageSmoothingEnabled = false; // Disable smoothing for pixelated look
+        
         // Pre-calculate sin/cos tables for performance
         this.initTrigTables();
         
@@ -78,6 +85,12 @@ class Raycaster {
         this.wallImageData = this.ctx.createImageData(1, this.canvas.height);
         this.wallBuffer = new Uint8ClampedArray(this.wallImageData.data.buffer);
         
+        // Resize the strip canvas
+        if (this.stripCanvas) {
+            this.stripCanvas.width = WALL_STRIP_WIDTH;
+            this.stripCanvas.height = this.canvas.height;
+        }
+        
         // Update gradients when resizing
         if (this.ctx) {
             this.createSkyGradient();
@@ -126,6 +139,9 @@ class Raycaster {
             // FPS is good, decrease skipRays (higher resolution)
             this.skipRays = Math.max(1, this.skipRays - 1);
         }
+        
+        // Ensure walls are always fully rendered without gaps
+        this.quality = this.skipRays >= 3 ? 1.05 : 1.0;
     }
     
     // Cast rays and render the 3D scene
@@ -298,16 +314,21 @@ class Raycaster {
                     // Get image data for the vertical strip
                     this.wallImageData.data.set(this.wallBuffer.subarray(0, stripHeight * 4));
                     
+                    // Clear the strip canvas area we'll use
+                    this.stripCtx.clearRect(0, 0, stripWidth, stripHeight);
+                    
+                    // Draw the single-pixel wall strip to the strip canvas
+                    this.stripCtx.putImageData(this.wallImageData, 0, 0, 0, 0, 1, stripHeight);
+                    
+                    // Scale the strip to fill the entire width by drawing it back onto itself
+                    this.stripCtx.drawImage(this.stripCanvas, 0, 0, 1, stripHeight, 0, 0, stripWidth, stripHeight);
+                    
                     // Batch render strips for the same ray step (fill in gaps)
                     for (let i = 0; i < rayStep; i++) {
                         if (ray + i < RAY_COUNT) {
                             const x = (ray + i) * stripWidth;
-                            this.ctx.putImageData(
-                                this.wallImageData, 
-                                x, drawStart, 
-                                0, 0, 
-                                stripWidth, stripHeight
-                            );
+                            // Draw the complete strip to the main canvas (fills the entire width)
+                            this.ctx.drawImage(this.stripCanvas, 0, 0, stripWidth, stripHeight, x, drawStart, stripWidth, stripHeight);
                         }
                     }
                 }
