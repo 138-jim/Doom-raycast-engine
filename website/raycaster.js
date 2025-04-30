@@ -141,7 +141,7 @@ class Raycaster {
         const screenWidth = this.canvas.width;
         const halfHeight = screenHeight / 2;
         const startAngle = player.angle - HALF_FOV;
-        const stripWidth = Math.max(1, WALL_STRIP_WIDTH * this.quality);
+        const stripWidth = WALL_STRIP_WIDTH * this.quality;
         
         // For sprite rendering
         const zBuffer = new Float32Array(RAY_COUNT);
@@ -261,18 +261,7 @@ class Raycaster {
                 
                 // Distance fog effect (use less intensive calculation)
                 const distanceFactor = perpWallDist / MAX_DEPTH;
-                
-                // Reduce LOD effect when close to walls
-                let lodFactor = 0.6;
-                if (perpWallDist < RENDER_DISTANCE_CLOSE) {
-                    lodFactor = 0.2; // Much less fog/LOD effect when very close
-                } else if (perpWallDist < RENDER_DISTANCE_MID) {
-                    // Linear interpolation between 0.2 and 0.6 based on distance
-                    lodFactor = 0.2 + (perpWallDist - RENDER_DISTANCE_CLOSE) / 
-                                (RENDER_DISTANCE_MID - RENDER_DISTANCE_CLOSE) * 0.4;
-                }
-                
-                const shadeFactor = baseShadeFactor * (1.0 - distanceFactor * lodFactor);
+                const shadeFactor = baseShadeFactor * (1.0 - distanceFactor * 0.6);
                 
                 // Draw vertical wall strip more efficiently using pre-allocated image data
                 const stripHeight = drawEnd - drawStart;
@@ -313,13 +302,11 @@ class Raycaster {
                     for (let i = 0; i < rayStep; i++) {
                         if (ray + i < RAY_COUNT) {
                             const x = (ray + i) * stripWidth;
-                            // Ensure strip width is at least 1 pixel
-                            const actualStripWidth = Math.max(1, stripWidth);
                             this.ctx.putImageData(
                                 this.wallImageData, 
                                 x, drawStart, 
                                 0, 0, 
-                                actualStripWidth, stripHeight
+                                stripWidth, stripHeight
                             );
                         }
                     }
@@ -519,12 +506,10 @@ class Raycaster {
                     // Only draw if sprite is closer than the wall at this ray
                     if (dist / TILE_SIZE < zBuffer[rayIdx]) {
                         // Draw vertical strip from pre-rendered sprite
-                        // Ensure strip width is at least 1 pixel
-                        const actualStripWidth = Math.max(1, stripSkip);
                         this.ctx.drawImage(
                             tempCanvas,
-                            x - spriteLeft, 0, actualStripWidth, stripHeight,
-                            x, spriteTop, actualStripWidth, stripHeight
+                            x - spriteLeft, 0, stripSkip, stripHeight,
+                            x, spriteTop, stripSkip, stripHeight
                         );
                     }
                 }
