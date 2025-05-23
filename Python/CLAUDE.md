@@ -68,3 +68,7 @@ pip install numba  # Optional, for performance improvements
 - **R**: Reload weapon
 - **P**: Toggle enemy path display on minimap
 - **Esc**: Return to menu (during gameplay) or quit (in menu)
+
+## commiting to repository
+- when the user asks you to commit and push write a description of what you have done
+- dont include the generated with claude code or include yourself as a co-author in the commit summary
