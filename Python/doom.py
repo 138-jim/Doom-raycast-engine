@@ -80,13 +80,13 @@ MAX_PATH_LENGTH = 100       # Maximum nodes in path to prevent excessive computa
 
 # Enemy type settings
 SCOUT_SPEED = 0.12
-SCOUT_HP = 2
+SCOUT_HP = 3  # Slightly increased
 SCOUT_DAMAGE = 8
 SCOUT_ATTACK_RANGE = 1.2
 SCOUT_ATTACK_COOLDOWN = 40
 
 TANK_SPEED = 0.05
-TANK_HP = 6
+TANK_HP = 12  # Doubled to make them much tankier
 TANK_DAMAGE = 15
 TANK_ATTACK_RANGE = 1.8
 TANK_ATTACK_COOLDOWN = 80
@@ -103,6 +103,11 @@ ALERT_DURATION = 300  # frames
 SEARCH_DURATION = 180  # frames
 SIGHT_RANGE = 6.0  # Tiles
 COORDINATION_RANGE = 4.0  # Tiles for group coordination
+
+# Clustering settings
+MAX_CLUSTER_SIZE = 3  # Maximum enemies per cluster
+CLUSTER_RADIUS = 2.0  # Tiles - how close cluster points are to each other
+NUM_CLUSTERS = 3  # Number of patrol clusters on the map
 
 # Performance settings
 WALL_HEIGHT_LIMIT = SCREEN_HEIGHT * 2.5  # Maximum wall height to prevent excessive rendering
@@ -663,7 +668,10 @@ class Enemy:
         self.group_id = None
         self.coordination_timer = 0
         
-        # Generate patrol route
+        # Clustering
+        self.cluster_id = None
+        
+        # Generate patrol route (may be overridden by cluster assignment)
         self._generate_patrol_route()
     
     def _set_type_stats(self):
@@ -788,17 +796,27 @@ class Enemy:
         if distance > SIGHT_RANGE * TILE_SIZE:
             return False
         
-        # Simple line of sight check
-        steps = int(distance / (TILE_SIZE / 4))
+        # Very close - always can see
+        if distance < TILE_SIZE * 0.5:
+            return True
+        
+        # More robust line of sight check using DDA-like approach
+        steps = max(10, int(distance / (TILE_SIZE / 8)))  # More granular checking
+        
         for i in range(1, steps):
-            check_x = self.x + (dx * i / steps)
-            check_y = self.y + (dy * i / steps)
+            t = i / steps
+            check_x = self.x + dx * t
+            check_y = self.y + dy * t
             
             map_x = int(check_x / TILE_SIZE)
             map_y = int(check_y / TILE_SIZE)
             
-            if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
-                MAP[map_y][map_x] == 1):
+            # Check bounds
+            if not (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT):
+                return False
+                
+            # Check if we hit a wall
+            if MAP[map_y][map_x] == 1:
                 return False
         
         return True
@@ -1213,6 +1231,75 @@ class EnemyManager:
         self.show_paths = False  # Toggle for showing paths on minimap
         self.spawn_attempts = 0  # Track consecutive spawn failures
         
+        # Clustering system
+        self.patrol_clusters = []
+        self._generate_patrol_clusters()
+    
+    def _generate_patrol_clusters(self):
+        """Generate patrol cluster points across the map"""
+        self.patrol_clusters = []
+        
+        for cluster_id in range(NUM_CLUSTERS):
+            cluster_points = []
+            max_attempts = 100
+            attempts = 0
+            
+            # Find a good central point for this cluster
+            while attempts < max_attempts and len(cluster_points) == 0:
+                center_x = random.randint(3, MAP_WIDTH - 4)
+                center_y = random.randint(3, MAP_HEIGHT - 4)
+                
+                # Check if center is valid
+                if MAP[center_y][center_x] == 0:
+                    center_world_x = center_x * TILE_SIZE + TILE_SIZE / 2
+                    center_world_y = center_y * TILE_SIZE + TILE_SIZE / 2
+                    
+                    # Generate 2-3 points around this center
+                    num_points = random.randint(2, 3)
+                    
+                    for _ in range(num_points):
+                        # Generate points within cluster radius
+                        angle = random.uniform(0, 2 * math.pi)
+                        distance = random.uniform(0.5, CLUSTER_RADIUS)
+                        
+                        point_x = center_world_x + math.cos(angle) * distance * TILE_SIZE
+                        point_y = center_world_y + math.sin(angle) * distance * TILE_SIZE
+                        
+                        # Check if point is valid
+                        map_x = int(point_x / TILE_SIZE)
+                        map_y = int(point_y / TILE_SIZE)
+                        
+                        if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
+                            MAP[map_y][map_x] == 0):
+                            cluster_points.append((point_x, point_y))
+                    
+                    # If we got at least 2 valid points, keep this cluster
+                    if len(cluster_points) >= 2:
+                        self.patrol_clusters.append({
+                            'id': cluster_id,
+                            'points': cluster_points,
+                            'center': (center_world_x, center_world_y),
+                            'enemies': []  # Track which enemies are assigned to this cluster
+                        })
+                
+                attempts += 1
+        
+        # Ensure we have at least one cluster
+        if not self.patrol_clusters:
+            # Fallback: create a simple cluster in the middle of the map
+            center_x = MAP_WIDTH // 2
+            center_y = MAP_HEIGHT // 2
+            center_world_x = center_x * TILE_SIZE + TILE_SIZE / 2
+            center_world_y = center_y * TILE_SIZE + TILE_SIZE / 2
+            
+            self.patrol_clusters.append({
+                'id': 0,
+                'points': [(center_world_x, center_world_y), 
+                          (center_world_x + TILE_SIZE, center_world_y + TILE_SIZE)],
+                'center': (center_world_x, center_world_y),
+                'enemies': []
+            })
+        
     def update(self, player, gun):
         # Process existing enemies
         for enemy in self.enemies[:]:  # Use a copy to safely remove during iteration
@@ -1252,6 +1339,14 @@ class EnemyManager:
                 if distance < hit_distance_threshold and angle_diff < hit_angle_threshold:
                     enemy_killed = enemy.take_damage()
                     if enemy_killed:
+                        # Remove from cluster tracking
+                        if hasattr(enemy, 'cluster_id') and enemy.cluster_id is not None:
+                            for cluster in self.patrol_clusters:
+                                if cluster['id'] == enemy.cluster_id:
+                                    if enemy in cluster['enemies']:
+                                        cluster['enemies'].remove(enemy)
+                                    break
+                        
                         self.enemies.remove(enemy)
                         player.score += 100
                         
@@ -1282,19 +1377,38 @@ class EnemyManager:
                     self.spawn_cooldown = ENEMY_SPAWN_COOLDOWN
     
     def spawn_enemy(self, player):
-        # Maximum attempts to find a valid spawn position
+        # Find a cluster that isn't full
+        available_clusters = [cluster for cluster in self.patrol_clusters 
+                            if len(cluster['enemies']) < MAX_CLUSTER_SIZE]
+        
+        if not available_clusters:
+            return False  # All clusters are full
+        
+        # Choose a random available cluster
+        chosen_cluster = random.choice(available_clusters)
+        
+        # Try to spawn near the cluster center
         max_attempts = 30
         attempts = 0
         
         while attempts < max_attempts:
             attempts += 1
             
-            # Random map position
-            x = random.randint(1, MAP_WIDTH-2)
-            y = random.randint(1, MAP_HEIGHT-2)
+            # Generate position near cluster center
+            center_x, center_y = chosen_cluster['center']
+            
+            # Random offset from cluster center
+            angle = random.uniform(0, 2 * math.pi)
+            distance = random.uniform(0, CLUSTER_RADIUS * 1.5)
+            
+            spawn_x = center_x + math.cos(angle) * distance * TILE_SIZE
+            spawn_y = center_y + math.sin(angle) * distance * TILE_SIZE
+            
+            x = int(spawn_x / TILE_SIZE)
+            y = int(spawn_y / TILE_SIZE)
             
             # Check if position is valid (not in a wall)
-            if MAP[y][x] == 0:
+            if (0 <= x < MAP_WIDTH and 0 <= y < MAP_HEIGHT and MAP[y][x] == 0):
                 # Check if another enemy is already at this position
                 position_occupied = False
                 for enemy in self.enemies:
@@ -1337,10 +1451,22 @@ class EnemyManager:
                         
                         # Create a new enemy at this position
                         new_enemy = Enemy(spawn_pos_x, spawn_pos_y, enemy_type)
-                        # Give it the initial path to the player (but it will patrol instead)
-                        new_enemy.path = path
+                        
+                        # Assign enemy to the chosen cluster
+                        new_enemy.cluster_id = chosen_cluster['id']
+                        chosen_cluster['enemies'].append(new_enemy)
+                        
+                        # Give it the cluster's patrol points instead of random ones
+                        new_enemy.patrol_points = chosen_cluster['points'].copy()
+                        new_enemy.current_patrol_index = 0
+                        
+                        # Give it initial path to first patrol point
+                        if new_enemy.patrol_points:
+                            target = new_enemy.patrol_points[0]
+                            new_enemy.path = a_star_pathfinding(spawn_pos_x, spawn_pos_y, target[0], target[1])
+                        
                         self.enemies.append(new_enemy)
-                        print(f"Spawned {enemy_type.value} enemy at ({spawn_pos_x:.0f}, {spawn_pos_y:.0f})")
+                        print(f"Spawned {enemy_type.value} enemy in cluster {chosen_cluster['id']} at ({spawn_pos_x:.0f}, {spawn_pos_y:.0f})")
                         return True
         
         # If we've reached max attempts without finding a valid position
