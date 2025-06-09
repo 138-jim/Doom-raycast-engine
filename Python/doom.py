@@ -12,6 +12,18 @@ import heapq
 from collections import deque
 from enum import Enum
 
+# Enemy types and states
+class EnemyType(Enum):
+    SCOUT = "scout"
+    TANK = "tank"
+    RANGED = "ranged"
+
+class EnemyState(Enum):
+    PATROL = "patrol"
+    ALERT = "alert"
+    SEARCH = "search"
+    ATTACK = "attack"
+
 # Try to import numba, but provide fallback if not available
 try:
     from numba import njit, jit, prange
@@ -61,10 +73,36 @@ ENEMY_HP = 3
 ENEMY_DAMAGE = 10
 ENEMY_ATTACK_RANGE = 1.5
 ENEMY_ATTACK_COOLDOWN = 60  # frames
-MAX_ENEMIES = 5
+MAX_ENEMIES = 8  # Increased for variety
 ENEMY_SPAWN_COOLDOWN = 100  # frames
 PATH_UPDATE_FREQUENCY = 10  # Update path every N frames
 MAX_PATH_LENGTH = 100       # Maximum nodes in path to prevent excessive computation
+
+# Enemy type settings
+SCOUT_SPEED = 0.12
+SCOUT_HP = 2
+SCOUT_DAMAGE = 8
+SCOUT_ATTACK_RANGE = 1.2
+SCOUT_ATTACK_COOLDOWN = 40
+
+TANK_SPEED = 0.05
+TANK_HP = 6
+TANK_DAMAGE = 15
+TANK_ATTACK_RANGE = 1.8
+TANK_ATTACK_COOLDOWN = 80
+
+RANGED_SPEED = 0.06
+RANGED_HP = 2
+RANGED_DAMAGE = 12
+RANGED_ATTACK_RANGE = 4.0
+RANGED_ATTACK_COOLDOWN = 90
+
+# Enemy state settings
+PATROL_RADIUS = 3.0  # Tiles
+ALERT_DURATION = 300  # frames
+SEARCH_DURATION = 180  # frames
+SIGHT_RANGE = 6.0  # Tiles
+COORDINATION_RANGE = 4.0  # Tiles for group coordination
 
 # Performance settings
 WALL_HEIGHT_LIMIT = SCREEN_HEIGHT * 2.5  # Maximum wall height to prevent excessive rendering
@@ -589,13 +627,23 @@ class Player:
 
 # Modify the Enemy class to use pathfinding
 class Enemy:
-    def __init__(self, x, y):
+    def __init__(self, x, y, enemy_type=None):
         self.x = x
         self.y = y
-        self.hp = ENEMY_HP
+        self.original_x = x  # For patrol behavior
+        self.original_y = y
+        
+        # Assign random type if not specified
+        if enemy_type is None:
+            enemy_type = random.choice(list(EnemyType))
+        self.enemy_type = enemy_type
+        
+        # Set stats based on type
+        self._set_type_stats()
+        
         self.attack_cooldown = 0
         self.hit_effect = 0  # Visual indicator when hit
-        self.sprites = create_enemy_sprite()  # Create sprites with different angles
+        self.sprites = create_enemy_sprite(self.enemy_type)  # Create sprites with different angles
         self.current_sprite_idx = 0  # Default to front-facing
         
         # Pathfinding attributes
@@ -604,7 +652,71 @@ class Enemy:
         self.current_path_index = 0
         self.angle = 0  # Direction enemy is facing
         
-    def update(self, player):
+        # State system
+        self.state = EnemyState.PATROL
+        self.state_timer = 0
+        self.last_player_pos = None
+        self.patrol_target = None
+        self.alert_level = 0  # 0-100, higher means more alert
+        
+        # Group coordination
+        self.group_id = None
+        self.coordination_timer = 0
+        
+        # Generate patrol route
+        self._generate_patrol_route()
+    
+    def _set_type_stats(self):
+        """Set stats based on enemy type"""
+        if self.enemy_type == EnemyType.SCOUT:
+            self.max_hp = SCOUT_HP
+            self.speed = SCOUT_SPEED
+            self.damage = SCOUT_DAMAGE
+            self.attack_range = SCOUT_ATTACK_RANGE
+            self.max_attack_cooldown = SCOUT_ATTACK_COOLDOWN
+        elif self.enemy_type == EnemyType.TANK:
+            self.max_hp = TANK_HP
+            self.speed = TANK_SPEED
+            self.damage = TANK_DAMAGE
+            self.attack_range = TANK_ATTACK_RANGE
+            self.max_attack_cooldown = TANK_ATTACK_COOLDOWN
+        elif self.enemy_type == EnemyType.RANGED:
+            self.max_hp = RANGED_HP
+            self.speed = RANGED_SPEED
+            self.damage = RANGED_DAMAGE
+            self.attack_range = RANGED_ATTACK_RANGE
+            self.max_attack_cooldown = RANGED_ATTACK_COOLDOWN
+        
+        self.hp = self.max_hp
+    
+    def _generate_patrol_route(self):
+        """Generate a random patrol route around spawn point"""
+        self.patrol_points = []
+        num_points = random.randint(2, 4)
+        
+        for _ in range(num_points):
+            # Generate random point within patrol radius
+            angle = random.uniform(0, 2 * math.pi)
+            distance = random.uniform(1.0, PATROL_RADIUS)
+            
+            patrol_x = self.original_x + math.cos(angle) * distance * TILE_SIZE
+            patrol_y = self.original_y + math.sin(angle) * distance * TILE_SIZE
+            
+            # Ensure point is valid
+            map_x = int(patrol_x / TILE_SIZE)
+            map_y = int(patrol_y / TILE_SIZE)
+            
+            if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
+                MAP[map_y][map_x] == 0):
+                self.patrol_points.append((patrol_x, patrol_y))
+        
+        if not self.patrol_points:
+            # Fallback: just stay at spawn
+            self.patrol_points = [(self.original_x, self.original_y)]
+        
+        self.current_patrol_index = 0
+        
+    def update(self, player, other_enemies=None):
         # Calculate direction to player
         dx = player.x - self.x
         dy = player.y - self.y
@@ -618,50 +730,230 @@ class Enemy:
             self.hit_effect -= 1
             return False  # Not attacking
         
-        # Update pathfinding
+        # Check if player is in sight
+        player_in_sight = self._can_see_player(player)
+        
+        # Update state based on conditions
+        self._update_state(player, player_in_sight, other_enemies)
+        
+        # Update pathfinding based on current state
+        self._update_pathfinding(player)
+        
+        # Move based on current state
+        self._move()
+        
+        # Update sprite
+        self._update_sprite()
+        
+        # Handle attack cooldown
+        if self.attack_cooldown > 0:
+            self.attack_cooldown -= 1
+        
+        # Check if in attack range and can attack
+        attacking = False
+        if (self.state == EnemyState.ATTACK and 
+            distance < TILE_SIZE * self.attack_range and 
+            self.attack_cooldown == 0):
+            attacking = True
+            self.attack_cooldown = self.max_attack_cooldown
+            
+        return attacking
+    
+    def _can_see_player(self, player):
+        """Check if enemy can see the player using line of sight"""
+        dx = player.x - self.x
+        dy = player.y - self.y
+        distance = math.sqrt(dx*dx + dy*dy)
+        
+        # Too far to see
+        if distance > SIGHT_RANGE * TILE_SIZE:
+            return False
+        
+        # Simple line of sight check
+        steps = int(distance / (TILE_SIZE / 4))
+        for i in range(1, steps):
+            check_x = self.x + (dx * i / steps)
+            check_y = self.y + (dy * i / steps)
+            
+            map_x = int(check_x / TILE_SIZE)
+            map_y = int(check_y / TILE_SIZE)
+            
+            if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
+                MAP[map_y][map_x] == 1):
+                return False
+        
+        return True
+    
+    def _update_state(self, player, player_in_sight, other_enemies):
+        """Update enemy state based on conditions"""
+        self.state_timer += 1
+        
+        # State transitions
+        if player_in_sight:
+            if self.state == EnemyState.PATROL:
+                self.state = EnemyState.ALERT
+                self.state_timer = 0
+                self.last_player_pos = (player.x, player.y)
+                # Alert nearby enemies
+                self._alert_nearby_enemies(other_enemies, player)
+            elif self.state == EnemyState.SEARCH:
+                self.state = EnemyState.ALERT
+                self.state_timer = 0
+                self.last_player_pos = (player.x, player.y)
+            
+            # Always update last known position when player is visible
+            self.last_player_pos = (player.x, player.y)
+            self.alert_level = min(100, self.alert_level + 2)
+        else:
+            # Player not visible, decrease alert level
+            self.alert_level = max(0, self.alert_level - 1)
+        
+        # State-specific behavior
+        if self.state == EnemyState.PATROL:
+            # Continue patrolling
+            pass
+        elif self.state == EnemyState.ALERT:
+            if self.state_timer > ALERT_DURATION or not player_in_sight:
+                if self.last_player_pos:
+                    self.state = EnemyState.SEARCH
+                    self.state_timer = 0
+                else:
+                    self.state = EnemyState.PATROL
+                    self.state_timer = 0
+            else:
+                # Stay in alert, ready to attack
+                dx = player.x - self.x
+                dy = player.y - self.y
+                distance = math.sqrt(dx*dx + dy*dy)
+                if distance <= TILE_SIZE * self.attack_range:
+                    self.state = EnemyState.ATTACK
+        elif self.state == EnemyState.SEARCH:
+            if player_in_sight:
+                self.state = EnemyState.ALERT
+                self.state_timer = 0
+            elif self.state_timer > SEARCH_DURATION:
+                self.state = EnemyState.PATROL
+                self.state_timer = 0
+                self.last_player_pos = None
+        elif self.state == EnemyState.ATTACK:
+            if not player_in_sight:
+                self.state = EnemyState.SEARCH
+                self.state_timer = 0
+            else:
+                dx = player.x - self.x
+                dy = player.y - self.y
+                distance = math.sqrt(dx*dx + dy*dy)
+                if distance > TILE_SIZE * self.attack_range:
+                    self.state = EnemyState.ALERT
+    
+    def _alert_nearby_enemies(self, other_enemies, player):
+        """Alert nearby enemies when this enemy spots the player"""
+        if not other_enemies:
+            return
+        
+        for enemy in other_enemies:
+            if enemy == self:
+                continue
+            
+            dx = enemy.x - self.x
+            dy = enemy.y - self.y
+            distance = math.sqrt(dx*dx + dy*dy)
+            
+            if distance <= COORDINATION_RANGE * TILE_SIZE:
+                if enemy.state == EnemyState.PATROL:
+                    enemy.state = EnemyState.ALERT
+                    enemy.state_timer = 0
+                    enemy.last_player_pos = (player.x, player.y)
+                    enemy.alert_level = min(100, enemy.alert_level + 5)
+    
+    def _update_pathfinding(self, player):
+        """Update pathfinding based on current state"""
         self.path_update_counter += 1
-        if self.path_update_counter >= PATH_UPDATE_FREQUENCY or not self.path:
-            self.path = a_star_pathfinding(self.x, self.y, player.x, player.y)
+        
+        should_update_path = (self.path_update_counter >= PATH_UPDATE_FREQUENCY or 
+                             not self.path)
+        
+        if should_update_path:
             self.path_update_counter = 0
             self.current_path_index = 0
             
-            # Limit path length to prevent excessive computation
-            if len(self.path) > MAX_PATH_LENGTH:
+            if self.state == EnemyState.PATROL:
+                # Move to next patrol point
+                if self.patrol_points:
+                    target = self.patrol_points[self.current_patrol_index]
+                    self.path = a_star_pathfinding(self.x, self.y, target[0], target[1])
+                    
+                    # Check if reached patrol point
+                    dx = target[0] - self.x
+                    dy = target[1] - self.y
+                    if math.sqrt(dx*dx + dy*dy) < TILE_SIZE / 2:
+                        self.current_patrol_index = (self.current_patrol_index + 1) % len(self.patrol_points)
+                        
+            elif self.state in [EnemyState.ALERT, EnemyState.ATTACK]:
+                # Path directly to player
+                self.path = a_star_pathfinding(self.x, self.y, player.x, player.y)
+                
+            elif self.state == EnemyState.SEARCH:
+                # Path to last known player position
+                if self.last_player_pos:
+                    self.path = a_star_pathfinding(self.x, self.y, 
+                                                 self.last_player_pos[0], 
+                                                 self.last_player_pos[1])
+                    
+                    # Check if reached last known position
+                    dx = self.last_player_pos[0] - self.x
+                    dy = self.last_player_pos[1] - self.y
+                    if math.sqrt(dx*dx + dy*dy) < TILE_SIZE:
+                        self.last_player_pos = None  # Stop searching
+            
+            # Limit path length
+            if self.path and len(self.path) > MAX_PATH_LENGTH:
                 self.path = self.path[:MAX_PATH_LENGTH]
+    
+    def _move(self):
+        """Move enemy along current path"""
+        if not self.path or self.current_path_index >= len(self.path):
+            return
         
-        # Move along path if available
-        if self.path and self.current_path_index < len(self.path) and distance > TILE_SIZE * 0.8:
-            target_x, target_y = self.path[self.current_path_index]
-            
-            # Calculate direction to next path node
-            path_dx = target_x - self.x
-            path_dy = target_y - self.y
-            path_distance = math.sqrt(path_dx*path_dx + path_dy*path_dy)
-            
-            # If close enough to current waypoint, move to next
-            if path_distance < TILE_SIZE / 2:
-                self.current_path_index += 1
-            else:
-                # Normalize direction
-                if path_distance > 0:
-                    path_dx /= path_distance
-                    path_dy /= path_distance
-                
-                # Move towards next path node
-                new_x = self.x + path_dx * ENEMY_SPEED * TILE_SIZE
-                new_y = self.y + path_dy * ENEMY_SPEED * TILE_SIZE
-                
-                # Map coordinates
-                map_x = int(new_x / TILE_SIZE)
-                map_y = int(new_y / TILE_SIZE)
-                
-                # Check if position is valid
-                if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
-                    MAP[map_y][map_x] == 0):
-                    self.x = new_x
-                    self.y = new_y
+        target_x, target_y = self.path[self.current_path_index]
         
-        # Select appropriate sprite based on angle to player
+        # Calculate direction to next path node
+        path_dx = target_x - self.x
+        path_dy = target_y - self.y
+        path_distance = math.sqrt(path_dx*path_dx + path_dy*path_dy)
+        
+        # If close enough to current waypoint, move to next
+        if path_distance < TILE_SIZE / 2:
+            self.current_path_index += 1
+        else:
+            # Normalize direction
+            if path_distance > 0:
+                path_dx /= path_distance
+                path_dy /= path_distance
+            
+            # Apply speed multiplier based on state
+            speed_multiplier = 1.0
+            if self.state == EnemyState.ALERT:
+                speed_multiplier = 1.2  # Move faster when alert
+            elif self.state == EnemyState.SEARCH:
+                speed_multiplier = 0.8  # Move slower when searching
+            
+            # Move towards next path node
+            new_x = self.x + path_dx * self.speed * TILE_SIZE * speed_multiplier
+            new_y = self.y + path_dy * self.speed * TILE_SIZE * speed_multiplier
+            
+            # Map coordinates
+            map_x = int(new_x / TILE_SIZE)
+            map_y = int(new_y / TILE_SIZE)
+            
+            # Check if position is valid
+            if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
+                MAP[map_y][map_x] == 0):
+                self.x = new_x
+                self.y = new_y
+    
+    def _update_sprite(self):
+        """Update sprite based on viewing angle"""
         # Normalize angle to 0-360 degrees
         normalized_angle = (self.angle + 360) % 360
         
@@ -677,22 +969,17 @@ class Enemy:
         # Left side: 225 to 315 degrees
         else:
             self.current_sprite_idx = 1  # Side sprite (mirrored later)
-        
-        # Handle attack cooldown
-        if self.attack_cooldown > 0:
-            self.attack_cooldown -= 1
-        
-        # Check if in attack range
-        attacking = False
-        if distance < TILE_SIZE * ENEMY_ATTACK_RANGE and self.attack_cooldown == 0:
-            attacking = True
-            self.attack_cooldown = ENEMY_ATTACK_COOLDOWN
-            
-        return attacking
     
     def take_damage(self, damage=1):
         self.hp -= damage
         self.hit_effect = 5  # Visual effect duration
+        
+        # When hit, become more alert
+        self.alert_level = min(100, self.alert_level + 10)
+        if self.state == EnemyState.PATROL:
+            self.state = EnemyState.ALERT
+            self.state_timer = 0
+        
         return self.hp <= 0  # Return True if dead
     
     def get_current_sprite(self):
@@ -706,30 +993,42 @@ class Enemy:
         return base_sprite
     
 # Create a multi-frame enemy sprite generator
-def create_enemy_sprite():
+def create_enemy_sprite(enemy_type=EnemyType.SCOUT):
     # Base size for the enemy sprite
     sprite_size = TILE_SIZE
     
     # Create different facing sprites for multiple viewing angles
     sprites = []
     
-    # Create front-facing sprite (same as before)
+    # Set colors based on enemy type
+    if enemy_type == EnemyType.SCOUT:
+        body_color = (100, 150, 30)  # Green for scouts (fast)
+        head_color = (120, 180, 40)
+    elif enemy_type == EnemyType.TANK:
+        body_color = (80, 80, 80)   # Gray for tanks (armored)
+        head_color = (100, 100, 100)
+    elif enemy_type == EnemyType.RANGED:
+        body_color = (150, 30, 150)  # Purple for ranged (magic)
+        head_color = (180, 40, 180)
+    else:
+        body_color = (150, 30, 30)   # Default red
+        head_color = (180, 40, 40)
+    
+    # Create front-facing sprite
     front_sprite = pygame.Surface((sprite_size, sprite_size), pygame.SRCALPHA)
     
-    # Body (dark red)
-    body_color = (150, 30, 30)
+    # Body
     pygame.draw.rect(front_sprite, body_color, (sprite_size//4, sprite_size//3, sprite_size//2, sprite_size//2))
     
-    # Head (lighter red)
-    head_color = (180, 40, 40)
+    # Head
     head_size = sprite_size//4
     pygame.draw.circle(front_sprite, head_color, (sprite_size//2, sprite_size//4), head_size)
     
-    # Arms (dark red)
+    # Arms
     pygame.draw.rect(front_sprite, body_color, (sprite_size//8, sprite_size//3, sprite_size//6, sprite_size//3))
     pygame.draw.rect(front_sprite, body_color, (sprite_size*5//8, sprite_size//3, sprite_size//6, sprite_size//3))
     
-    # Legs (dark red)
+    # Legs
     pygame.draw.rect(front_sprite, body_color, (sprite_size//3, sprite_size*5//6, sprite_size//6, sprite_size//6))
     pygame.draw.rect(front_sprite, body_color, (sprite_size//2, sprite_size*5//6, sprite_size//6, sprite_size//6))
     
@@ -907,11 +1206,11 @@ class EnemyManager:
         # Process existing enemies
         for enemy in self.enemies[:]:  # Use a copy to safely remove during iteration
             # Update enemy and check if attacking
-            attacking = enemy.update(player)
+            attacking = enemy.update(player, self.enemies)
             
             # If enemy is attacking player
             if attacking:
-                player_died = player.take_damage(ENEMY_DAMAGE)
+                player_died = player.take_damage(enemy.damage)
                 if player_died:
                     print("Player died!")
                     # Handle player death if needed
@@ -1013,11 +1312,24 @@ class EnemyManager:
                     
                     # If a path exists, this is a valid spawn position
                     if path and len(path) > 1:  # Ensure path has at least 2 points
+                        # Choose random enemy type with weights
+                        enemy_type_weights = {
+                            EnemyType.SCOUT: 40,   # 40% chance
+                            EnemyType.TANK: 30,    # 30% chance  
+                            EnemyType.RANGED: 30   # 30% chance
+                        }
+                        
+                        # Select weighted random type
+                        types = list(enemy_type_weights.keys())
+                        weights = list(enemy_type_weights.values())
+                        enemy_type = random.choices(types, weights=weights)[0]
+                        
                         # Create a new enemy at this position
-                        new_enemy = Enemy(spawn_pos_x, spawn_pos_y)
-                        # Give it the initial path to the player
+                        new_enemy = Enemy(spawn_pos_x, spawn_pos_y, enemy_type)
+                        # Give it the initial path to the player (but it will patrol instead)
                         new_enemy.path = path
                         self.enemies.append(new_enemy)
+                        print(f"Spawned {enemy_type.value} enemy at ({spawn_pos_x:.0f}, {spawn_pos_y:.0f})")
                         return True
         
         # If we've reached max attempts without finding a valid position
@@ -1029,10 +1341,30 @@ class EnemyManager:
         for enemy in self.enemies:
             x = int(enemy.x / TILE_SIZE * minimap_scale)
             y = int(enemy.y / TILE_SIZE * minimap_scale)
-            color = (255, 0, 0) if enemy.hit_effect > 0 else (200, 50, 50)
             
-            # Draw enemy dot
-            pygame.draw.circle(screen, color, (x, y), 2)
+            # Color based on type and state
+            if enemy.hit_effect > 0:
+                color = (255, 255, 255)  # White when hit
+            elif enemy.state == EnemyState.ATTACK:
+                color = (255, 0, 0)      # Red when attacking
+            elif enemy.state == EnemyState.ALERT:
+                color = (255, 165, 0)    # Orange when alert
+            elif enemy.state == EnemyState.SEARCH:
+                color = (255, 255, 0)    # Yellow when searching
+            else:  # PATROL
+                # Type-based colors when patrolling
+                if enemy.enemy_type == EnemyType.SCOUT:
+                    color = (0, 255, 0)      # Green for scouts
+                elif enemy.enemy_type == EnemyType.TANK:
+                    color = (128, 128, 128)  # Gray for tanks
+                elif enemy.enemy_type == EnemyType.RANGED:
+                    color = (255, 0, 255)    # Magenta for ranged
+                else:
+                    color = (200, 50, 50)    # Default red
+            
+            # Draw enemy dot (larger for tanks)
+            dot_size = 3 if enemy.enemy_type == EnemyType.TANK else 2
+            pygame.draw.circle(screen, color, (x, y), dot_size)
             
             # Draw enemy facing direction
             dir_x = x + math.cos(math.radians(enemy.angle)) * 5
