@@ -101,7 +101,7 @@ RANGED_ATTACK_COOLDOWN = 90
 PATROL_RADIUS = 3.0  # Tiles
 ALERT_DURATION = 300  # frames
 SEARCH_DURATION = 180  # frames
-SIGHT_RANGE = 6.0  # Tiles
+SIGHT_RANGE = 200  # Tiles
 COORDINATION_RANGE = 4.0  # Tiles for group coordination
 
 # Clustering settings
