@@ -660,6 +660,7 @@ class Enemy:
         # State system
         self.state = EnemyState.PATROL
         self.state_timer = 0
+        print(f"Enemy initialized in PATROL state at ({x:.0f}, {y:.0f})")
         self.last_player_pos = None
         self.patrol_target = None
         self.alert_level = 0  # 0-100, higher means more alert
@@ -702,46 +703,72 @@ class Enemy:
         self.patrol_points = []
         
         # Generate two random valid points on the map
-        for _ in range(2):
+        for point_num in range(2):
             attempts = 0
-            max_attempts = 50
+            max_attempts = 100
             
             while attempts < max_attempts:
                 # Random position anywhere on the map
-                map_x = random.randint(1, MAP_WIDTH - 2)
-                map_y = random.randint(1, MAP_HEIGHT - 2)
+                map_x = random.randint(2, MAP_WIDTH - 3)
+                map_y = random.randint(2, MAP_HEIGHT - 3)
                 
                 # Check if position is valid (not in a wall)
                 if MAP[map_y][map_x] == 0:
                     patrol_x = map_x * TILE_SIZE + TILE_SIZE / 2
                     patrol_y = map_y * TILE_SIZE + TILE_SIZE / 2
-                    self.patrol_points.append((patrol_x, patrol_y))
-                    break
+                    
+                    # If this is the second point, make sure it's far enough from the first
+                    if len(self.patrol_points) == 0:
+                        self.patrol_points.append((patrol_x, patrol_y))
+                        break
+                    else:
+                        first_point = self.patrol_points[0]
+                        distance = math.sqrt((patrol_x - first_point[0])**2 + (patrol_y - first_point[1])**2)
+                        if distance > TILE_SIZE * 3:  # Ensure points are reasonably far apart
+                            self.patrol_points.append((patrol_x, patrol_y))
+                            break
                 
                 attempts += 1
         
-        # Fallback: if we couldn't find two points, use spawn location and one nearby
+        # Fallback: if we couldn't find two points, create them around spawn location
         if len(self.patrol_points) < 2:
-            self.patrol_points = [(self.original_x, self.original_y)]
-            # Try to find one nearby point
-            for dx in [-1, 1, 0]:
-                for dy in [-1, 1, 0]:
-                    if dx == 0 and dy == 0:
-                        continue
+            print(f"Fallback patrol generation for enemy at ({self.original_x:.0f}, {self.original_y:.0f})")
+            self.patrol_points = []
+            
+            # First point: spawn location
+            self.patrol_points.append((self.original_x, self.original_y))
+            
+            # Second point: try to find a valid point within reasonable distance
+            for radius in [3, 5, 7, 10]:  # Try increasing radii
+                found = False
+                for attempt in range(20):
+                    angle = random.uniform(0, 2 * math.pi)
+                    offset_x = math.cos(angle) * radius * TILE_SIZE
+                    offset_y = math.sin(angle) * radius * TILE_SIZE
                     
-                    map_x = int(self.original_x / TILE_SIZE) + dx
-                    map_y = int(self.original_y / TILE_SIZE) + dy
+                    patrol_x = self.original_x + offset_x
+                    patrol_y = self.original_y + offset_y
+                    
+                    map_x = int(patrol_x / TILE_SIZE)
+                    map_y = int(patrol_y / TILE_SIZE)
                     
                     if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
                         MAP[map_y][map_x] == 0):
-                        patrol_x = map_x * TILE_SIZE + TILE_SIZE / 2
-                        patrol_y = map_y * TILE_SIZE + TILE_SIZE / 2
                         self.patrol_points.append((patrol_x, patrol_y))
+                        found = True
                         break
-                if len(self.patrol_points) >= 2:
+                
+                if found:
                     break
+            
+            # Ultimate fallback: just move one tile away
+            if len(self.patrol_points) < 2:
+                patrol_x = self.original_x + TILE_SIZE
+                patrol_y = self.original_y + TILE_SIZE
+                self.patrol_points.append((patrol_x, patrol_y))
         
         self.current_patrol_index = 0
+        print(f"Generated patrol route with {len(self.patrol_points)} points: {self.patrol_points}")
         
     def update(self, player, other_enemies=None):
         # Calculate direction to player
@@ -912,7 +939,9 @@ class Enemy:
         
         # State-specific behavior
         if self.state == EnemyState.PATROL:
-            # Continue patrolling
+            # Continue patrolling - debug info
+            if self.state_timer % 120 == 0:  # Print every 2 seconds
+                print(f"Enemy patrolling: point {self.current_patrol_index}/{len(self.patrol_points) if self.patrol_points else 0}")
             pass
         elif self.state == EnemyState.ALERT:
             # This state is now skipped - go directly to attack when spotted
@@ -970,15 +999,23 @@ class Enemy:
             
             if self.state == EnemyState.PATROL:
                 # Move to next patrol point
-                if self.patrol_points:
+                if self.patrol_points and len(self.patrol_points) >= 2:
                     target = self.patrol_points[self.current_patrol_index]
                     self.path = a_star_pathfinding(self.x, self.y, target[0], target[1])
                     
-                    # Check if reached patrol point
+                    # Check if reached patrol point (more lenient distance check)
                     dx = target[0] - self.x
                     dy = target[1] - self.y
-                    if math.sqrt(dx*dx + dy*dy) < TILE_SIZE / 2:
+                    if math.sqrt(dx*dx + dy*dy) < TILE_SIZE * 0.8:
                         self.current_patrol_index = (self.current_patrol_index + 1) % len(self.patrol_points)
+                        print(f"Enemy reached patrol point {self.current_patrol_index}/{len(self.patrol_points)}")
+                else:
+                    # If no valid patrol points, regenerate them
+                    print("No valid patrol points, regenerating...")
+                    self._generate_patrol_route()
+                    if self.patrol_points and len(self.patrol_points) >= 2:
+                        target = self.patrol_points[0]
+                        self.path = a_star_pathfinding(self.x, self.y, target[0], target[1])
                         
             elif self.state in [EnemyState.ALERT, EnemyState.ATTACK]:
                 # Path directly to player for immediate pursuit
@@ -1521,13 +1558,18 @@ class EnemyManager:
                         chosen_cluster['enemies'].append(new_enemy)
                         
                         # Give it the cluster's patrol points instead of random ones
-                        new_enemy.patrol_points = chosen_cluster['points'].copy()
-                        new_enemy.current_patrol_index = 0
-                        
-                        # Give it initial path to first patrol point
-                        if new_enemy.patrol_points:
+                        if len(chosen_cluster['points']) >= 2:
+                            new_enemy.patrol_points = chosen_cluster['points'].copy()
+                            new_enemy.current_patrol_index = 0
+                            print(f"Assigned {len(new_enemy.patrol_points)} cluster patrol points to enemy")
+                            
+                            # Give it initial path to first patrol point
                             target = new_enemy.patrol_points[0]
                             new_enemy.path = a_star_pathfinding(spawn_pos_x, spawn_pos_y, target[0], target[1])
+                        else:
+                            # Cluster doesn't have enough points, let enemy generate its own
+                            print("Cluster has insufficient points, enemy will generate own patrol route")
+                            new_enemy._generate_patrol_route()
                         
                         self.enemies.append(new_enemy)
                         print(f"Spawned {enemy_type.value} enemy in cluster {chosen_cluster['id']} at ({spawn_pos_x:.0f}, {spawn_pos_y:.0f})")
