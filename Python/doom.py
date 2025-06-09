@@ -94,7 +94,7 @@ TANK_ATTACK_COOLDOWN = 80
 RANGED_SPEED = 0.06
 RANGED_HP = 2
 RANGED_DAMAGE = 12
-RANGED_ATTACK_RANGE = 4.0
+RANGED_ATTACK_RANGE = 6.0  # Extended range for ranged enemies
 RANGED_ATTACK_COOLDOWN = 90
 
 # Enemy state settings
@@ -690,29 +690,48 @@ class Enemy:
         self.hp = self.max_hp
     
     def _generate_patrol_route(self):
-        """Generate a random patrol route around spawn point"""
+        """Generate a random patrol route with two points anywhere on the map"""
         self.patrol_points = []
-        num_points = random.randint(2, 4)
         
-        for _ in range(num_points):
-            # Generate random point within patrol radius
-            angle = random.uniform(0, 2 * math.pi)
-            distance = random.uniform(1.0, PATROL_RADIUS)
+        # Generate two random valid points on the map
+        for _ in range(2):
+            attempts = 0
+            max_attempts = 50
             
-            patrol_x = self.original_x + math.cos(angle) * distance * TILE_SIZE
-            patrol_y = self.original_y + math.sin(angle) * distance * TILE_SIZE
-            
-            # Ensure point is valid
-            map_x = int(patrol_x / TILE_SIZE)
-            map_y = int(patrol_y / TILE_SIZE)
-            
-            if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
-                MAP[map_y][map_x] == 0):
-                self.patrol_points.append((patrol_x, patrol_y))
+            while attempts < max_attempts:
+                # Random position anywhere on the map
+                map_x = random.randint(1, MAP_WIDTH - 2)
+                map_y = random.randint(1, MAP_HEIGHT - 2)
+                
+                # Check if position is valid (not in a wall)
+                if MAP[map_y][map_x] == 0:
+                    patrol_x = map_x * TILE_SIZE + TILE_SIZE / 2
+                    patrol_y = map_y * TILE_SIZE + TILE_SIZE / 2
+                    self.patrol_points.append((patrol_x, patrol_y))
+                    break
+                
+                attempts += 1
         
-        if not self.patrol_points:
-            # Fallback: just stay at spawn
+        # Fallback: if we couldn't find two points, use spawn location and one nearby
+        if len(self.patrol_points) < 2:
             self.patrol_points = [(self.original_x, self.original_y)]
+            # Try to find one nearby point
+            for dx in [-1, 1, 0]:
+                for dy in [-1, 1, 0]:
+                    if dx == 0 and dy == 0:
+                        continue
+                    
+                    map_x = int(self.original_x / TILE_SIZE) + dx
+                    map_y = int(self.original_y / TILE_SIZE) + dy
+                    
+                    if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
+                        MAP[map_y][map_x] == 0):
+                        patrol_x = map_x * TILE_SIZE + TILE_SIZE / 2
+                        patrol_y = map_y * TILE_SIZE + TILE_SIZE / 2
+                        self.patrol_points.append((patrol_x, patrol_y))
+                        break
+                if len(self.patrol_points) >= 2:
+                    break
         
         self.current_patrol_index = 0
         
@@ -790,14 +809,15 @@ class Enemy:
         
         # State transitions
         if player_in_sight:
+            # Immediately go to attack state when player is spotted
             if self.state == EnemyState.PATROL:
-                self.state = EnemyState.ALERT
+                self.state = EnemyState.ATTACK
                 self.state_timer = 0
                 self.last_player_pos = (player.x, player.y)
                 # Alert nearby enemies
                 self._alert_nearby_enemies(other_enemies, player)
             elif self.state == EnemyState.SEARCH:
-                self.state = EnemyState.ALERT
+                self.state = EnemyState.ATTACK
                 self.state_timer = 0
                 self.last_player_pos = (player.x, player.y)
             
@@ -813,6 +833,7 @@ class Enemy:
             # Continue patrolling
             pass
         elif self.state == EnemyState.ALERT:
+            # This state is now skipped - go directly to attack when spotted
             if self.state_timer > ALERT_DURATION or not player_in_sight:
                 if self.last_player_pos:
                     self.state = EnemyState.SEARCH
@@ -820,16 +841,9 @@ class Enemy:
                 else:
                     self.state = EnemyState.PATROL
                     self.state_timer = 0
-            else:
-                # Stay in alert, ready to attack
-                dx = player.x - self.x
-                dy = player.y - self.y
-                distance = math.sqrt(dx*dx + dy*dy)
-                if distance <= TILE_SIZE * self.attack_range:
-                    self.state = EnemyState.ATTACK
         elif self.state == EnemyState.SEARCH:
             if player_in_sight:
-                self.state = EnemyState.ALERT
+                self.state = EnemyState.ATTACK  # Immediately attack when spotted again
                 self.state_timer = 0
             elif self.state_timer > SEARCH_DURATION:
                 self.state = EnemyState.PATROL
@@ -839,12 +853,7 @@ class Enemy:
             if not player_in_sight:
                 self.state = EnemyState.SEARCH
                 self.state_timer = 0
-            else:
-                dx = player.x - self.x
-                dy = player.y - self.y
-                distance = math.sqrt(dx*dx + dy*dy)
-                if distance > TILE_SIZE * self.attack_range:
-                    self.state = EnemyState.ALERT
+            # Continue attacking/pursuing as long as player is visible
     
     def _alert_nearby_enemies(self, other_enemies, player):
         """Alert nearby enemies when this enemy spots the player"""
@@ -861,7 +870,7 @@ class Enemy:
             
             if distance <= COORDINATION_RANGE * TILE_SIZE:
                 if enemy.state == EnemyState.PATROL:
-                    enemy.state = EnemyState.ALERT
+                    enemy.state = EnemyState.ATTACK  # Go directly to attack when alerted
                     enemy.state_timer = 0
                     enemy.last_player_pos = (player.x, player.y)
                     enemy.alert_level = min(100, enemy.alert_level + 5)
@@ -890,7 +899,7 @@ class Enemy:
                         self.current_patrol_index = (self.current_patrol_index + 1) % len(self.patrol_points)
                         
             elif self.state in [EnemyState.ALERT, EnemyState.ATTACK]:
-                # Path directly to player
+                # Path directly to player for immediate pursuit
                 self.path = a_star_pathfinding(self.x, self.y, player.x, player.y)
                 
             elif self.state == EnemyState.SEARCH:
@@ -933,7 +942,9 @@ class Enemy:
             
             # Apply speed multiplier based on state
             speed_multiplier = 1.0
-            if self.state == EnemyState.ALERT:
+            if self.state == EnemyState.ATTACK:
+                speed_multiplier = 1.3  # Move faster when attacking/pursuing
+            elif self.state == EnemyState.ALERT:
                 speed_multiplier = 1.2  # Move faster when alert
             elif self.state == EnemyState.SEARCH:
                 speed_multiplier = 0.8  # Move slower when searching
