@@ -787,7 +787,7 @@ class Enemy:
         return attacking
     
     def _can_see_player(self, player):
-        """Check if enemy can see the player using line of sight"""
+        """Check if enemy can see the player using accurate DDA raycasting"""
         dx = player.x - self.x
         dy = player.y - self.y
         distance = math.sqrt(dx*dx + dy*dy)
@@ -797,29 +797,93 @@ class Enemy:
             return False
         
         # Very close - always can see
-        if distance < TILE_SIZE * 0.5:
+        if distance < TILE_SIZE * 0.1:
             return True
         
-        # More robust line of sight check using DDA-like approach
-        steps = max(10, int(distance / (TILE_SIZE / 8)))  # More granular checking
+        # Use DDA raycasting (same algorithm as the game's wall detection)
+        return self._dda_line_of_sight(self.x, self.y, player.x, player.y)
+    
+    def _dda_line_of_sight(self, start_x, start_y, end_x, end_y):
+        """DDA-based line of sight check - returns True if no walls block the view"""
         
-        for i in range(1, steps):
-            t = i / steps
-            check_x = self.x + dx * t
-            check_y = self.y + dy * t
+        # Convert to map coordinates
+        start_map_x = start_x / TILE_SIZE
+        start_map_y = start_y / TILE_SIZE
+        end_map_x = end_x / TILE_SIZE
+        end_map_y = end_y / TILE_SIZE
+        
+        # Calculate ray direction
+        ray_dir_x = end_map_x - start_map_x
+        ray_dir_y = end_map_y - start_map_y
+        ray_length = math.sqrt(ray_dir_x * ray_dir_x + ray_dir_y * ray_dir_y)
+        
+        # Normalize direction
+        if ray_length == 0:
+            return True  # Same position
+        
+        ray_dir_x /= ray_length
+        ray_dir_y /= ray_length
+        
+        # Initialize map position for DDA
+        map_x = int(start_map_x)
+        map_y = int(start_map_y)
+        
+        # Calculate DDA parameters
+        delta_dist_x = abs(1 / ray_dir_x) if ray_dir_x != 0 else float('inf')
+        delta_dist_y = abs(1 / ray_dir_y) if ray_dir_y != 0 else float('inf')
+        
+        step_x = 1 if ray_dir_x >= 0 else -1
+        step_y = 1 if ray_dir_y >= 0 else -1
+        
+        if ray_dir_x < 0:
+            side_dist_x = (start_map_x - map_x) * delta_dist_x
+        else:
+            side_dist_x = (map_x + 1.0 - start_map_x) * delta_dist_x
             
-            map_x = int(check_x / TILE_SIZE)
-            map_y = int(check_y / TILE_SIZE)
+        if ray_dir_y < 0:
+            side_dist_y = (start_map_y - map_y) * delta_dist_y
+        else:
+            side_dist_y = (map_y + 1.0 - start_map_y) * delta_dist_y
+        
+        # Target map coordinates
+        target_map_x = int(end_map_x)
+        target_map_y = int(end_map_y)
+        
+        # Perform DDA to check for walls
+        max_dda_steps = int(ray_length) + 2  # Limit steps based on distance
+        dda_steps = 0
+        
+        while dda_steps < max_dda_steps:
+            dda_steps += 1
             
-            # Check bounds
+            # Check if we've reached the target
+            if map_x == target_map_x and map_y == target_map_y:
+                return True  # Reached target without hitting walls
+            
+            # Check if we're close enough to the target position
+            current_x = map_x + 0.5
+            current_y = map_y + 0.5
+            target_distance = math.sqrt((current_x - end_map_x)**2 + (current_y - end_map_y)**2)
+            if target_distance < 0.1:  # Very close to target
+                return True
+            
+            # Jump to next square
+            if side_dist_x < side_dist_y:
+                side_dist_x += delta_dist_x
+                map_x += step_x
+            else:
+                side_dist_y += delta_dist_y
+                map_y += step_y
+                 
+            # Check if ray is out of bounds
             if not (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT):
                 return False
                 
-            # Check if we hit a wall
-            if MAP[map_y][map_x] == 1:
-                return False
+            # Check if ray hit a wall
+            if MAP[map_y][map_x] > 0:
+                return False  # Wall blocks line of sight
         
-        return True
+        return True  # No walls found within reasonable distance
     
     def _update_state(self, player, player_in_sight, other_enemies):
         """Update enemy state based on conditions"""
