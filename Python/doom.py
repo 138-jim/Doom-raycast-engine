@@ -24,6 +24,118 @@ class EnemyState(Enum):
     SEARCH = "search"
     ATTACK = "attack"
 
+class PatrolGroup:
+    def __init__(self, group_id, center_x, center_y):
+        self.group_id = group_id
+        self.center_x = center_x
+        self.center_y = center_y
+        self.members = []  # List of enemies in this group
+        self.current_target = (center_x, center_y)
+        self.patrol_points = []
+        self.current_patrol_index = 0
+        self.target_update_timer = 0
+        self.movement_state = "patrolling"  # "patrolling", "pursuing", "searching"
+        
+        # Generate patrol route for the group
+        self._generate_group_patrol_route()
+    
+    def _generate_group_patrol_route(self):
+        """Generate patrol points for the entire group"""
+        self.patrol_points = []
+        
+        # Generate 3-4 patrol points in a circuit around the center
+        num_points = random.randint(3, 4)
+        for i in range(num_points):
+            attempts = 0
+            max_attempts = 50
+            
+            while attempts < max_attempts:
+                # Generate points in a rough circle around center
+                angle = (i / num_points) * 2 * math.pi + random.uniform(-0.5, 0.5)
+                distance = random.uniform(GROUP_PATROL_RADIUS * 0.5, GROUP_PATROL_RADIUS) * TILE_SIZE
+                
+                patrol_x = self.center_x + math.cos(angle) * distance
+                patrol_y = self.center_y + math.sin(angle) * distance
+                
+                # Check if position is valid
+                map_x = int(patrol_x / TILE_SIZE)
+                map_y = int(patrol_y / TILE_SIZE)
+                
+                if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
+                    MAP[map_y][map_x] == 0):
+                    self.patrol_points.append((patrol_x, patrol_y))
+                    break
+                
+                attempts += 1
+        
+        # Ensure we have at least 2 points
+        if len(self.patrol_points) < 2:
+            self.patrol_points = [
+                (self.center_x, self.center_y),
+                (self.center_x + GROUP_PATROL_RADIUS * TILE_SIZE, self.center_y)
+            ]
+        
+        # Set initial target
+        if self.patrol_points:
+            self.current_target = self.patrol_points[0]
+    
+    def add_member(self, enemy):
+        """Add an enemy to this patrol group"""
+        enemy.patrol_group = self
+        enemy.group_target = self.current_target
+        self.members.append(enemy)
+        
+        # Set formation position
+        enemy.set_group_formation_position(len(self.members) - 1, GROUP_SIZE)
+        
+        print(f"Added enemy to patrol group {self.group_id}, now has {len(self.members)} members")
+    
+    def update(self):
+        """Update group patrol behavior"""
+        self.target_update_timer += 1
+        
+        # Check if group should move to next patrol point
+        if self.movement_state == "patrolling" and self.target_update_timer > 180:  # Every 3 seconds
+            # Check if group center is close to current target
+            group_center_x, group_center_y = self._calculate_group_center()
+            
+            if group_center_x is not None:
+                dx = self.current_target[0] - group_center_x
+                dy = self.current_target[1] - group_center_y
+                distance = math.sqrt(dx*dx + dy*dy)
+                
+                if distance < TILE_SIZE * 2:  # Close enough to target
+                    # Move to next patrol point
+                    self.current_patrol_index = (self.current_patrol_index + 1) % len(self.patrol_points)
+                    self.current_target = self.patrol_points[self.current_patrol_index]
+                    self.target_update_timer = 0
+                    
+                    # Update all members' targets
+                    for member in self.members:
+                        member.group_target = self.current_target
+                    
+                    print(f"Group {self.group_id} moving to patrol point {self.current_patrol_index}")
+    
+    def _calculate_group_center(self):
+        """Calculate the current center position of all group members"""
+        if not self.members:
+            return None, None
+        
+        total_x = sum(member.x for member in self.members)
+        total_y = sum(member.y for member in self.members)
+        
+        return total_x / len(self.members), total_y / len(self.members)
+    
+    def remove_member(self, enemy):
+        """Remove an enemy from this group"""
+        if enemy in self.members:
+            self.members.remove(enemy)
+            enemy.patrol_group = None
+            
+            # Reassign formation positions
+            for i, member in enumerate(self.members):
+                member.set_group_formation_position(i, len(self.members))
+
 # Try to import numba, but provide fallback if not available
 try:
     from numba import njit, jit, prange
@@ -98,16 +210,17 @@ RANGED_ATTACK_RANGE = 6.0  # Extended range for ranged enemies
 RANGED_ATTACK_COOLDOWN = 90
 
 # Enemy state settings
-PATROL_RADIUS = 3.0  # Tiles
 ALERT_DURATION = 300  # frames
 SEARCH_DURATION = 180  # frames
 SIGHT_RANGE = 200  # Tiles
 COORDINATION_RANGE = 4.0  # Tiles for group coordination
 
-# Clustering settings
-MAX_CLUSTER_SIZE = 3  # Maximum enemies per cluster
-CLUSTER_RADIUS = 2.0  # Tiles - how close cluster points are to each other
-NUM_CLUSTERS = 3  # Number of patrol clusters on the map
+# Group patrol settings
+GROUP_SIZE = 3  # Enemies per patrol group
+GROUP_FORMATION_DISTANCE = 2.0  # Tiles between group members
+GROUP_PATROL_RADIUS = 8.0  # Tiles - how far groups patrol from center
+NUM_PATROL_GROUPS = 3  # Number of patrol groups on the map
+GROUP_COHESION_STRENGTH = 0.3  # How strongly enemies stick to group formation
 
 # Performance settings
 WALL_HEIGHT_LIMIT = SCREEN_HEIGHT * 2.5  # Maximum wall height to prevent excessive rendering
@@ -660,20 +773,15 @@ class Enemy:
         # State system
         self.state = EnemyState.PATROL
         self.state_timer = 0
-        print(f"Enemy initialized in PATROL state at ({x:.0f}, {y:.0f})")
         self.last_player_pos = None
-        self.patrol_target = None
         self.alert_level = 0  # 0-100, higher means more alert
         
-        # Group coordination
-        self.group_id = None
-        self.coordination_timer = 0
-        
-        # Clustering
-        self.cluster_id = None
-        
-        # Generate patrol route (may be overridden by cluster assignment)
-        self._generate_patrol_route()
+        # Group patrol system
+        self.patrol_group = None  # Will be assigned by EnemyManager
+        self.group_position = None  # Position within the group formation
+        self.group_target = None  # Current group movement target
+        self.formation_offset_x = 0  # Offset from group center
+        self.formation_offset_y = 0
     
     def _set_type_stats(self):
         """Set stats based on enemy type"""
@@ -698,77 +806,24 @@ class Enemy:
         
         self.hp = self.max_hp
     
-    def _generate_patrol_route(self):
-        """Generate a random patrol route with two points anywhere on the map"""
-        self.patrol_points = []
+    def set_group_formation_position(self, position_index, total_in_group):
+        """Set this enemy's position within group formation"""
+        self.group_position = position_index
         
-        # Generate two random valid points on the map
-        for point_num in range(2):
-            attempts = 0
-            max_attempts = 100
-            
-            while attempts < max_attempts:
-                # Random position anywhere on the map
-                map_x = random.randint(2, MAP_WIDTH - 3)
-                map_y = random.randint(2, MAP_HEIGHT - 3)
-                
-                # Check if position is valid (not in a wall)
-                if MAP[map_y][map_x] == 0:
-                    patrol_x = map_x * TILE_SIZE + TILE_SIZE / 2
-                    patrol_y = map_y * TILE_SIZE + TILE_SIZE / 2
-                    
-                    # If this is the second point, make sure it's far enough from the first
-                    if len(self.patrol_points) == 0:
-                        self.patrol_points.append((patrol_x, patrol_y))
-                        break
-                    else:
-                        first_point = self.patrol_points[0]
-                        distance = math.sqrt((patrol_x - first_point[0])**2 + (patrol_y - first_point[1])**2)
-                        if distance > TILE_SIZE * 3:  # Ensure points are reasonably far apart
-                            self.patrol_points.append((patrol_x, patrol_y))
-                            break
-                
-                attempts += 1
-        
-        # Fallback: if we couldn't find two points, create them around spawn location
-        if len(self.patrol_points) < 2:
-            print(f"Fallback patrol generation for enemy at ({self.original_x:.0f}, {self.original_y:.0f})")
-            self.patrol_points = []
-            
-            # First point: spawn location
-            self.patrol_points.append((self.original_x, self.original_y))
-            
-            # Second point: try to find a valid point within reasonable distance
-            for radius in [3, 5, 7, 10]:  # Try increasing radii
-                found = False
-                for attempt in range(20):
-                    angle = random.uniform(0, 2 * math.pi)
-                    offset_x = math.cos(angle) * radius * TILE_SIZE
-                    offset_y = math.sin(angle) * radius * TILE_SIZE
-                    
-                    patrol_x = self.original_x + offset_x
-                    patrol_y = self.original_y + offset_y
-                    
-                    map_x = int(patrol_x / TILE_SIZE)
-                    map_y = int(patrol_y / TILE_SIZE)
-                    
-                    if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
-                        MAP[map_y][map_x] == 0):
-                        self.patrol_points.append((patrol_x, patrol_y))
-                        found = True
-                        break
-                
-                if found:
-                    break
-            
-            # Ultimate fallback: just move one tile away
-            if len(self.patrol_points) < 2:
-                patrol_x = self.original_x + TILE_SIZE
-                patrol_y = self.original_y + TILE_SIZE
-                self.patrol_points.append((patrol_x, patrol_y))
-        
-        self.current_patrol_index = 0
-        print(f"Generated patrol route with {len(self.patrol_points)} points: {self.patrol_points}")
+        # Calculate formation offset based on position
+        if total_in_group == 1:
+            self.formation_offset_x = 0
+            self.formation_offset_y = 0
+        elif total_in_group == 2:
+            # Line formation
+            self.formation_offset_x = (position_index - 0.5) * GROUP_FORMATION_DISTANCE * TILE_SIZE
+            self.formation_offset_y = 0
+        else:
+            # Triangle or spread formation
+            angle = (position_index / total_in_group) * 2 * math.pi
+            distance = GROUP_FORMATION_DISTANCE * TILE_SIZE
+            self.formation_offset_x = math.cos(angle) * distance
+            self.formation_offset_y = math.sin(angle) * distance
         
     def update(self, player, other_enemies=None):
         # Calculate direction to player
@@ -939,9 +994,7 @@ class Enemy:
         
         # State-specific behavior
         if self.state == EnemyState.PATROL:
-            # Continue patrolling - debug info
-            if self.state_timer % 120 == 0:  # Print every 2 seconds
-                print(f"Enemy patrolling: point {self.current_patrol_index}/{len(self.patrol_points) if self.patrol_points else 0}")
+            # Group patrol behavior - will be handled by group coordination
             pass
         elif self.state == EnemyState.ALERT:
             # This state is now skipped - go directly to attack when spotted
@@ -998,24 +1051,22 @@ class Enemy:
             self.current_path_index = 0
             
             if self.state == EnemyState.PATROL:
-                # Move to next patrol point
-                if self.patrol_points and len(self.patrol_points) >= 2:
-                    target = self.patrol_points[self.current_patrol_index]
-                    self.path = a_star_pathfinding(self.x, self.y, target[0], target[1])
+                # Group patrol movement - move towards group target with formation offset
+                if self.patrol_group and self.group_target:
+                    # Calculate desired position (group target + formation offset)
+                    target_x = self.group_target[0] + self.formation_offset_x
+                    target_y = self.group_target[1] + self.formation_offset_y
                     
-                    # Check if reached patrol point (more lenient distance check)
-                    dx = target[0] - self.x
-                    dy = target[1] - self.y
-                    if math.sqrt(dx*dx + dy*dy) < TILE_SIZE * 0.8:
-                        self.current_patrol_index = (self.current_patrol_index + 1) % len(self.patrol_points)
-                        print(f"Enemy reached patrol point {self.current_patrol_index}/{len(self.patrol_points)}")
-                else:
-                    # If no valid patrol points, regenerate them
-                    print("No valid patrol points, regenerating...")
-                    self._generate_patrol_route()
-                    if self.patrol_points and len(self.patrol_points) >= 2:
-                        target = self.patrol_points[0]
-                        self.path = a_star_pathfinding(self.x, self.y, target[0], target[1])
+                    # Ensure target is in valid map location
+                    map_x = int(target_x / TILE_SIZE)
+                    map_y = int(target_y / TILE_SIZE)
+                    
+                    if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
+                        MAP[map_y][map_x] == 0):
+                        self.path = a_star_pathfinding(self.x, self.y, target_x, target_y)
+                    else:
+                        # If formation position is invalid, move to group center
+                        self.path = a_star_pathfinding(self.x, self.y, self.group_target[0], self.group_target[1])
                         
             elif self.state in [EnemyState.ALERT, EnemyState.ATTACK]:
                 # Path directly to player for immediate pursuit
@@ -1332,76 +1383,65 @@ class EnemyManager:
         self.show_paths = False  # Toggle for showing paths on minimap
         self.spawn_attempts = 0  # Track consecutive spawn failures
         
-        # Clustering system
-        self.patrol_clusters = []
-        self._generate_patrol_clusters()
+        # Group patrol system
+        self.patrol_groups = []
+        self._generate_patrol_groups()
     
-    def _generate_patrol_clusters(self):
-        """Generate patrol cluster points across the map"""
-        self.patrol_clusters = []
+    def _generate_patrol_groups(self):
+        """Generate patrol groups across the map"""
+        self.patrol_groups = []
         
-        for cluster_id in range(NUM_CLUSTERS):
-            cluster_points = []
-            max_attempts = 100
+        for group_id in range(NUM_PATROL_GROUPS):
             attempts = 0
+            max_attempts = 100
             
-            # Find a good central point for this cluster
-            while attempts < max_attempts and len(cluster_points) == 0:
-                center_x = random.randint(3, MAP_WIDTH - 4)
-                center_y = random.randint(3, MAP_HEIGHT - 4)
+            while attempts < max_attempts:
+                # Find a good central point for this group
+                center_x = random.randint(5, MAP_WIDTH - 6)
+                center_y = random.randint(5, MAP_HEIGHT - 6)
                 
-                # Check if center is valid
+                # Check if center is valid and has space around it
                 if MAP[center_y][center_x] == 0:
                     center_world_x = center_x * TILE_SIZE + TILE_SIZE / 2
                     center_world_y = center_y * TILE_SIZE + TILE_SIZE / 2
                     
-                    # Generate 2-3 points around this center
-                    num_points = random.randint(2, 3)
+                    # Check that there's enough open space around this center
+                    space_clear = True
+                    for check_x in range(center_x - 2, center_x + 3):
+                        for check_y in range(center_y - 2, center_y + 3):
+                            if (0 <= check_x < MAP_WIDTH and 0 <= check_y < MAP_HEIGHT):
+                                if MAP[check_y][check_x] != 0:
+                                    space_clear = False
+                                    break
+                        if not space_clear:
+                            break
                     
-                    for _ in range(num_points):
-                        # Generate points within cluster radius
-                        angle = random.uniform(0, 2 * math.pi)
-                        distance = random.uniform(0.5, CLUSTER_RADIUS)
-                        
-                        point_x = center_world_x + math.cos(angle) * distance * TILE_SIZE
-                        point_y = center_world_y + math.sin(angle) * distance * TILE_SIZE
-                        
-                        # Check if point is valid
-                        map_x = int(point_x / TILE_SIZE)
-                        map_y = int(point_y / TILE_SIZE)
-                        
-                        if (0 <= map_x < MAP_WIDTH and 0 <= map_y < MAP_HEIGHT and 
-                            MAP[map_y][map_x] == 0):
-                            cluster_points.append((point_x, point_y))
-                    
-                    # If we got at least 2 valid points, keep this cluster
-                    if len(cluster_points) >= 2:
-                        self.patrol_clusters.append({
-                            'id': cluster_id,
-                            'points': cluster_points,
-                            'center': (center_world_x, center_world_y),
-                            'enemies': []  # Track which enemies are assigned to this cluster
-                        })
+                    if space_clear:
+                        # Create the patrol group
+                        patrol_group = PatrolGroup(group_id, center_world_x, center_world_y)
+                        self.patrol_groups.append(patrol_group)
+                        print(f"Created patrol group {group_id} at ({center_world_x:.0f}, {center_world_y:.0f})")
+                        break
                 
                 attempts += 1
         
-        # Ensure we have at least one cluster
-        if not self.patrol_clusters:
-            # Fallback: create a simple cluster in the middle of the map
+        # Ensure we have at least one group
+        if not self.patrol_groups:
+            # Fallback: create a group in the middle of the map
             center_x = MAP_WIDTH // 2
             center_y = MAP_HEIGHT // 2
             center_world_x = center_x * TILE_SIZE + TILE_SIZE / 2
             center_world_y = center_y * TILE_SIZE + TILE_SIZE / 2
             
-            self.patrol_clusters.append({
-                'id': 0,
-                'points': [(center_world_x, center_world_y), 
-                          (center_world_x + TILE_SIZE, center_world_y + TILE_SIZE)],
-                'center': (center_world_x, center_world_y),
-                'enemies': []
-            })
+            patrol_group = PatrolGroup(0, center_world_x, center_world_y)
+            self.patrol_groups.append(patrol_group)
+            print(f"Fallback: Created patrol group 0 at map center")
         
     def update(self, player, gun):
+        # Update patrol groups
+        for group in self.patrol_groups:
+            group.update()
+        
         # Process existing enemies
         for enemy in self.enemies[:]:  # Use a copy to safely remove during iteration
             # Update enemy and check if attacking
@@ -1440,13 +1480,9 @@ class EnemyManager:
                 if distance < hit_distance_threshold and angle_diff < hit_angle_threshold:
                     enemy_killed = enemy.take_damage()
                     if enemy_killed:
-                        # Remove from cluster tracking
-                        if hasattr(enemy, 'cluster_id') and enemy.cluster_id is not None:
-                            for cluster in self.patrol_clusters:
-                                if cluster['id'] == enemy.cluster_id:
-                                    if enemy in cluster['enemies']:
-                                        cluster['enemies'].remove(enemy)
-                                    break
+                        # Remove from patrol group
+                        if enemy.patrol_group:
+                            enemy.patrol_group.remove_member(enemy)
                         
                         self.enemies.remove(enemy)
                         player.score += 100
@@ -1478,32 +1514,32 @@ class EnemyManager:
                     self.spawn_cooldown = ENEMY_SPAWN_COOLDOWN
     
     def spawn_enemy(self, player):
-        # Find a cluster that isn't full
-        available_clusters = [cluster for cluster in self.patrol_clusters 
-                            if len(cluster['enemies']) < MAX_CLUSTER_SIZE]
+        # Find a patrol group that isn't full
+        available_groups = [group for group in self.patrol_groups 
+                           if len(group.members) < GROUP_SIZE]
         
-        if not available_clusters:
-            return False  # All clusters are full
+        if not available_groups:
+            return False  # All groups are full
         
-        # Choose a random available cluster
-        chosen_cluster = random.choice(available_clusters)
+        # Choose a random available group
+        chosen_group = random.choice(available_groups)
         
-        # Try to spawn near the cluster center
+        # Try to spawn near the group center
         max_attempts = 30
         attempts = 0
         
         while attempts < max_attempts:
             attempts += 1
             
-            # Generate position near cluster center
-            center_x, center_y = chosen_cluster['center']
+            # Generate position near group center
+            center_x, center_y = chosen_group.center_x, chosen_group.center_y
             
-            # Random offset from cluster center
+            # Random offset from group center
             angle = random.uniform(0, 2 * math.pi)
-            distance = random.uniform(0, CLUSTER_RADIUS * 1.5)
+            distance = random.uniform(0, GROUP_FORMATION_DISTANCE * 2) * TILE_SIZE
             
-            spawn_x = center_x + math.cos(angle) * distance * TILE_SIZE
-            spawn_y = center_y + math.sin(angle) * distance * TILE_SIZE
+            spawn_x = center_x + math.cos(angle) * distance
+            spawn_y = center_y + math.sin(angle) * distance
             
             x = int(spawn_x / TILE_SIZE)
             y = int(spawn_y / TILE_SIZE)
@@ -1523,18 +1559,14 @@ class EnemyManager:
                     continue
                 
                 # Check distance from player
-                dx = x * TILE_SIZE - player.x
-                dy = y * TILE_SIZE - player.y
+                dx = spawn_x - player.x
+                dy = spawn_y - player.y
                 distance = math.sqrt(dx*dx + dy*dy)
                 
                 # Only spawn if far enough from player
                 if distance > TILE_SIZE * 3:
                     # Check reachability: can this enemy reach the player from here?
-                    spawn_pos_x = x * TILE_SIZE + TILE_SIZE / 2  # Center of tile
-                    spawn_pos_y = y * TILE_SIZE + TILE_SIZE / 2
-                    
-                    # Use our A* pathfinding to check if a path exists
-                    path = a_star_pathfinding(spawn_pos_x, spawn_pos_y, player.x, player.y)
+                    path = a_star_pathfinding(spawn_x, spawn_y, player.x, player.y)
                     
                     # If a path exists, this is a valid spawn position
                     if path and len(path) > 1:  # Ensure path has at least 2 points
@@ -1551,28 +1583,13 @@ class EnemyManager:
                         enemy_type = random.choices(types, weights=weights)[0]
                         
                         # Create a new enemy at this position
-                        new_enemy = Enemy(spawn_pos_x, spawn_pos_y, enemy_type)
+                        new_enemy = Enemy(spawn_x, spawn_y, enemy_type)
                         
-                        # Assign enemy to the chosen cluster
-                        new_enemy.cluster_id = chosen_cluster['id']
-                        chosen_cluster['enemies'].append(new_enemy)
-                        
-                        # Give it the cluster's patrol points instead of random ones
-                        if len(chosen_cluster['points']) >= 2:
-                            new_enemy.patrol_points = chosen_cluster['points'].copy()
-                            new_enemy.current_patrol_index = 0
-                            print(f"Assigned {len(new_enemy.patrol_points)} cluster patrol points to enemy")
-                            
-                            # Give it initial path to first patrol point
-                            target = new_enemy.patrol_points[0]
-                            new_enemy.path = a_star_pathfinding(spawn_pos_x, spawn_pos_y, target[0], target[1])
-                        else:
-                            # Cluster doesn't have enough points, let enemy generate its own
-                            print("Cluster has insufficient points, enemy will generate own patrol route")
-                            new_enemy._generate_patrol_route()
+                        # Add enemy to the chosen patrol group
+                        chosen_group.add_member(new_enemy)
                         
                         self.enemies.append(new_enemy)
-                        print(f"Spawned {enemy_type.value} enemy in cluster {chosen_cluster['id']} at ({spawn_pos_x:.0f}, {spawn_pos_y:.0f})")
+                        print(f"Spawned {enemy_type.value} enemy in patrol group {chosen_group.group_id} at ({spawn_x:.0f}, {spawn_y:.0f})")
                         return True
         
         # If we've reached max attempts without finding a valid position
