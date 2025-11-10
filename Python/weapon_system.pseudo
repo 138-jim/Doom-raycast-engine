@@ -1,0 +1,623 @@
+================================================================================
+MULTIPLE WEAPON SYSTEM PSEUDOCODE
+================================================================================
+
+
+
+--------------------------------------------------------------------------------
+SECTION 1: WEAPON CONFIGURATION DATA STRUCTURE
+--------------------------------------------------------------------------------
+
+DEFINE WeaponConfigs AS Dictionary:
+
+    pistol:
+        name = "PISTOL"
+        max_ammo = 12
+        damage = 1
+        fire_cooldown = 20          // frames between shots
+        reload_time = 150            // frames to reload
+        recoil = 10                  // visual recoil amount
+        recoil_recovery = 0.08       // recovery speed per frame
+        spread = 0                   // no spread (radians)
+        pellets = 1                  // single bullet per shot
+        auto = false                 // semi-automatic only
+
+    shotgun:
+        name = "SHOTGUN"
+        max_ammo = 8
+        damage = 1
+        fire_cooldown = 40
+        reload_time = 200
+        recoil = 25
+        recoil_recovery = 0.06
+        spread = 0.15                // wide spread pattern
+        pellets = 5                  // 5 pellets per shot
+        auto = false
+
+    rifle:
+        name = "RIFLE"
+        max_ammo = 30
+        damage = 1
+        fire_cooldown = 8
+        reload_time = 180
+        recoil = 6
+        recoil_recovery = 0.12
+        spread = 0.05                // slight spread
+        pellets = 1
+        auto = true                  // fully automatic
+
+
+--------------------------------------------------------------------------------
+SECTION 2: GUN CLASS STRUCTURE
+--------------------------------------------------------------------------------
+
+CLASS Gun:
+
+    PROPERTIES:
+        weapon_type         // string: 'pistol', 'shotgun', or 'rifle'
+        config              // reference to weapon configuration
+        recoil              // current recoil amount
+        firing              // boolean: currently firing
+        cooldown            // frames until can fire again
+        flash_duration      // muzzle flash timer
+        ammo                // current ammo count
+        reloading           // boolean: currently reloading
+        reload_timer        // frames remaining in reload
+        hit_data            // array of hit information for spread weapons
+        weapon_image        // visual representation of weapon
+        muzzle_flash        // muzzle flash graphic
+        sound_fire          // firing sound effect
+        sound_empty         // empty gun click sound
+        sound_reload        // reload sound effect
+
+
+    CONSTRUCTOR(weapon_type = 'pistol'):
+        SET this.weapon_type = weapon_type
+        SET this.config = WeaponConfigs[weapon_type]
+
+        INITIALIZE this.recoil = 0
+        INITIALIZE this.firing = false
+        INITIALIZE this.cooldown = 0
+        INITIALIZE this.flash_duration = 0
+        INITIALIZE this.ammo = this.config.max_ammo
+        INITIALIZE this.reloading = false
+        INITIALIZE this.reload_timer = 0
+        INITIALIZE this.hit_data = empty array
+
+        CALL create_weapon_image()
+        CALL create_muzzle_flash()
+        LOAD sound effects
+    END CONSTRUCTOR
+
+
+    METHOD create_weapon_image():
+        CREATE surface for weapon graphics
+
+        IF weapon_type == 'pistol':
+            DRAW compact handgun shape:
+                - thin barrel
+                - small body
+                - grip handle
+                - front sight
+
+        ELSE IF weapon_type == 'shotgun':
+            DRAW pump-action shotgun shape:
+                - wide barrel
+                - pump mechanism
+                - large body
+                - wooden stock
+                - front sight
+
+        ELSE IF weapon_type == 'rifle':
+            DRAW tactical rifle shape:
+                - long barrel
+                - extended body
+                - stock
+                - top rail
+                - scope mount
+                - visible magazine
+
+        RETURN weapon surface
+    END METHOD
+
+
+    METHOD fire():
+        IF cooldown == 0 AND NOT reloading:
+            IF ammo > 0:
+                // Trigger weapon firing
+                SET recoil = config.recoil
+                SET firing = true
+                SET cooldown = config.fire_cooldown
+                SET flash_duration = 4
+                DECREMENT ammo by 1
+
+                // Generate spread pattern for pellets
+                CLEAR hit_data array
+
+                FOR i FROM 0 TO config.pellets:
+                    IF config.spread > 0:
+                        // Calculate random spread angle
+                        spread_angle = RANDOM_FLOAT(-config.spread, config.spread)
+                    ELSE:
+                        spread_angle = 0
+                    END IF
+
+                    // Store pellet information
+                    ADD TO hit_data:
+                        angle_offset = spread_angle
+                        damage = config.damage
+                END FOR
+
+                PLAY sound_fire
+                RETURN true
+
+            ELSE:
+                // Empty gun
+                PLAY sound_empty
+                SET cooldown = config.fire_cooldown / 2
+                RETURN false
+            END IF
+        END IF
+
+        RETURN false
+    END METHOD
+
+
+    METHOD reload():
+        IF NOT reloading AND ammo < config.max_ammo:
+            SET reloading = true
+            SET reload_timer = config.reload_time
+            PLAY sound_reload
+        END IF
+    END METHOD
+
+
+    METHOD update():
+        // Handle recoil recovery
+        IF recoil > 0:
+            DECREMENT recoil by config.recoil_recovery
+            IF recoil < 0:
+                SET recoil = 0
+            END IF
+        END IF
+
+        // Handle fire cooldown
+        IF cooldown > 0:
+            DECREMENT cooldown by 1
+            IF cooldown == 0:
+                SET firing = false
+                CLEAR hit_data array
+            END IF
+        END IF
+
+        // Handle muzzle flash
+        IF flash_duration > 0:
+            DECREMENT flash_duration by 1
+        END IF
+
+        // Handle reloading
+        IF reloading:
+            DECREMENT reload_timer by 1
+            IF reload_timer <= 0:
+                SET ammo = config.max_ammo
+                SET reloading = false
+            END IF
+        END IF
+    END METHOD
+
+
+    METHOD draw(screen):
+        // Calculate weapon position with recoil
+        weapon_x = center_of_screen_x - weapon_width / 2
+        weapon_y = bottom_of_screen - weapon_height + recoil
+
+        // Draw weapon sprite
+        BLIT weapon_image AT (weapon_x, weapon_y)
+
+        // Draw muzzle flash if firing
+        IF flash_duration > 0:
+            flash_x = weapon_x + barrel_offset_x
+            flash_y = weapon_y + barrel_offset_y
+            BLIT muzzle_flash AT (flash_x, flash_y)
+        END IF
+
+        // Draw HUD information
+        DRAW TEXT config.name AT top_right (yellow color)
+        DRAW TEXT "AMMO: {ammo}/{max_ammo}" AT middle_right (white)
+
+        IF reloading:
+            DRAW TEXT "RELOADING..." AT bottom_right (yellow)
+        END IF
+
+        // Draw weapon switching hints
+        DRAW TEXT "1: PISTOL  2: SHOTGUN  3: RIFLE" AT bottom_left (gray)
+    END METHOD
+
+END CLASS
+
+
+--------------------------------------------------------------------------------
+SECTION 3: WEAPON INVENTORY SYSTEM
+--------------------------------------------------------------------------------
+
+GLOBAL VARIABLES:
+    weapon_inventory = Dictionary:
+        'pistol': max_ammo_for_pistol
+        'shotgun': max_ammo_for_shotgun
+        'rifle': max_ammo_for_rifle
+
+    current_weapon_type = 'pistol'
+    gun = new Gun('pistol')
+
+
+FUNCTION switch_weapon(new_weapon_type):
+    IF new_weapon_type != current_weapon_type:
+        // Save current weapon's ammo
+        weapon_inventory[current_weapon_type] = gun.ammo
+
+        // Switch to new weapon
+        current_weapon_type = new_weapon_type
+        gun = new Gun(new_weapon_type)
+
+        // Restore saved ammo for new weapon
+        gun.ammo = weapon_inventory[new_weapon_type]
+    END IF
+END FUNCTION
+
+
+FUNCTION reset_weapon_inventory():
+    FOR EACH weapon IN ['pistol', 'shotgun', 'rifle']:
+        weapon_inventory[weapon] = WeaponConfigs[weapon].max_ammo
+    END FOR
+    current_weapon_type = 'pistol'
+    gun = new Gun('pistol')
+END FUNCTION
+
+
+--------------------------------------------------------------------------------
+SECTION 4: INPUT HANDLING
+--------------------------------------------------------------------------------
+
+FUNCTION handle_weapon_input(event, keys, mouse_held):
+
+    // Weapon switching with number keys
+    IF event.key == KEY_1 AND game_is_playing:
+        CALL switch_weapon('pistol')
+
+    ELSE IF event.key == KEY_2 AND game_is_playing:
+        CALL switch_weapon('shotgun')
+
+    ELSE IF event.key == KEY_3 AND game_is_playing:
+        CALL switch_weapon('rifle')
+
+    // Reload
+    ELSE IF event.key == KEY_R AND game_is_playing:
+        CALL gun.reload()
+    END IF
+
+    // Single-shot firing (for mouse button)
+    IF mouse_button_pressed AND game_is_playing:
+        CALL gun.fire()
+    END IF
+
+    // Continuous firing (during game update)
+    IF keys[SPACE] AND game_is_playing:
+        IF gun.config.auto:
+            CALL gun.fire()    // Keep firing if automatic
+        END IF
+    END IF
+
+    IF mouse_held AND game_is_playing:
+        IF gun.config.auto:
+            CALL gun.fire()    // Keep firing if automatic
+        END IF
+    END IF
+
+END FUNCTION
+
+
+--------------------------------------------------------------------------------
+SECTION 5: MULTI-PELLET HIT DETECTION
+--------------------------------------------------------------------------------
+
+FUNCTION update_enemy_damage(player, gun, enemies):
+
+    FOR EACH enemy IN enemies:
+
+        IF gun.firing AND gun.hit_data is not empty:
+
+            // Calculate enemy position relative to player
+            dx = enemy.x - player.x
+            dy = enemy.y - player.y
+            distance = SQUARE_ROOT(dx² + dy²)
+
+            // Calculate angle to enemy
+            enemy_angle = ATAN2(dy, dx) converted to degrees
+            enemy_angle = NORMALIZE_ANGLE(enemy_angle)  // 0-360 range
+
+            // Check each pellet in the spread pattern
+            enemy_hit = false
+            hit_distance_threshold = MAX_HIT_DISTANCE
+            hit_angle_threshold = FIELD_OF_VIEW / 2 * 1.2
+
+            FOR EACH pellet_data IN gun.hit_data:
+
+                // Calculate this pellet's angle with spread offset
+                pellet_angle = player.angle + pellet_data.angle_offset
+                pellet_angle = NORMALIZE_ANGLE(pellet_angle)
+
+                // Calculate angle difference (accounting for wraparound)
+                angle_diff = MINIMUM_OF(
+                    |enemy_angle - pellet_angle|,
+                    |enemy_angle - pellet_angle + 360|,
+                    |enemy_angle - pellet_angle - 360|
+                )
+
+                // Check if this pellet hits the enemy
+                IF distance < hit_distance_threshold AND
+                   angle_diff < hit_angle_threshold:
+
+                    enemy_killed = enemy.take_damage(pellet_data.damage)
+                    enemy_hit = true
+
+                    IF enemy_killed:
+                        REMOVE enemy FROM enemies
+                        ADD 100 TO player.score
+                        PRINT "Enemy killed!"
+                        BREAK  // Stop checking pellets for this enemy
+                    END IF
+
+                END IF
+
+            END FOR
+
+        END IF
+
+    END FOR
+
+END FUNCTION
+
+
+--------------------------------------------------------------------------------
+SECTION 6: GAME STATE INITIALIZATION
+--------------------------------------------------------------------------------
+
+FUNCTION initialize_game():
+    // Create player
+    player = new Player(start_x, start_y, start_angle)
+
+    // Initialize weapon system
+    CALL reset_weapon_inventory()
+
+    // Create enemy manager
+    enemy_manager = new EnemyManager()
+
+    // Load textures and other resources
+    textures = LOAD_TEXTURES()
+
+    // Set game state
+    game_state = PLAYING
+END FUNCTION
+
+
+FUNCTION restart_game():
+    // Reset player
+    player = new Player(start_x, start_y, start_angle)
+
+    // Reset weapon system
+    CALL reset_weapon_inventory()
+
+    // Reset enemies
+    enemy_manager = new EnemyManager()
+
+    // Set game state
+    game_state = PLAYING
+END FUNCTION
+
+
+--------------------------------------------------------------------------------
+SECTION 7: MAIN GAME LOOP INTEGRATION
+--------------------------------------------------------------------------------
+
+FUNCTION main_game_loop():
+
+    INITIALIZE game
+
+    WHILE game_running:
+
+        // Handle input events
+        FOR EACH event IN events:
+            CALL handle_weapon_input(event, keys, mouse_held)
+            // ... other input handling
+        END FOR
+
+        // Update game state
+        IF game_state == PLAYING:
+
+            // Get input state
+            keys = GET_PRESSED_KEYS()
+            mouse_held = IS_MOUSE_BUTTON_HELD()
+
+            // Update player
+            player.update(keys, mouse_movement)
+
+            // Update weapon
+            gun.update()
+
+            // Update enemies with hit detection
+            CALL update_enemy_damage(player, gun, enemy_manager.enemies)
+            enemy_manager.update(player)
+
+            // Render scene
+            CALL render_3d_view(player, gun, enemy_manager, textures)
+
+            // Draw weapon HUD
+            gun.draw(screen)
+
+        END IF
+
+        // Refresh display
+        UPDATE_DISPLAY()
+
+    END WHILE
+
+END FUNCTION
+
+
+--------------------------------------------------------------------------------
+SECTION 8: WEAPON BALANCE FORMULAS
+--------------------------------------------------------------------------------
+
+// Damage Per Second (DPS) Calculation:
+DPS = (damage_per_shot × pellets × 60) / fire_cooldown
+
+Pistol DPS:   (1 × 1 × 60) / 20  = 3.0  DPS
+Shotgun DPS:  (1 × 5 × 60) / 40  = 7.5  DPS (if all pellets hit)
+Rifle DPS:    (1 × 1 × 60) / 8   = 7.5  DPS
+
+
+// Effective Range Calculation:
+effective_range = base_range - (spread × distance_modifier)
+
+Pistol:   No spread, accurate at all ranges
+Shotgun:  0.15 spread = effective within 3-4 tiles
+Rifle:    0.05 spread = effective within 6-8 tiles
+
+
+// Shots Per Magazine:
+total_shots_per_mag = max_ammo
+
+Pistol:   12 shots  = 12 damage potential
+Shotgun:  8 shots   = 40 damage potential (if all pellets hit)
+Rifle:    30 shots  = 30 damage potential
+
+
+// Time to Kill (TTK) - assumes enemy has 3 HP:
+Pistol:   3 shots  × 20 frames = 60 frames  = 1.0 second
+Shotgun:  1 shot   × 40 frames = 40 frames  = 0.67 second (close range)
+Rifle:    3 shots  × 8 frames  = 24 frames  = 0.4 second
+
+
+--------------------------------------------------------------------------------
+SECTION 9: SPREAD PATTERN ALGORITHM
+--------------------------------------------------------------------------------
+
+FUNCTION generate_spread_pattern(weapon_config):
+    pattern = empty array
+
+    FOR i FROM 0 TO weapon_config.pellets - 1:
+
+        IF weapon_config.spread > 0:
+            // Generate random angle within spread cone
+            // Uses uniform distribution
+            angle_offset = RANDOM_FLOAT(
+                -weapon_config.spread,
+                 weapon_config.spread
+            )
+        ELSE:
+            // No spread (pistol, precise shot)
+            angle_offset = 0
+        END IF
+
+        // Create pellet data
+        pellet = {
+            angle_offset: angle_offset,
+            damage: weapon_config.damage
+        }
+
+        ADD pellet TO pattern
+    END FOR
+
+    RETURN pattern
+END FUNCTION
+
+// Example outputs:
+// Pistol (spread=0, pellets=1):
+//   [{angle_offset: 0, damage: 1}]
+//
+// Shotgun (spread=0.15, pellets=5):
+//   [{angle_offset: -0.08, damage: 1},
+//    {angle_offset:  0.12, damage: 1},
+//    {angle_offset: -0.03, damage: 1},
+//    {angle_offset:  0.14, damage: 1},
+//    {angle_offset: -0.11, damage: 1}]
+//
+// Rifle (spread=0.05, pellets=1):
+//   [{angle_offset: 0.02, damage: 1}]
+
+
+--------------------------------------------------------------------------------
+SECTION 10: AUTOMATIC FIRE IMPLEMENTATION
+--------------------------------------------------------------------------------
+
+FUNCTION handle_automatic_fire(gun, input_held):
+    // Automatic fire allows continuous firing while input is held
+    // Semi-automatic requires releasing and pressing again
+
+    IF input_held:
+        IF gun.config.auto == true:
+            // Weapon supports automatic fire
+            success = gun.fire()
+
+            // Note: fire() internally handles cooldown
+            // Will only actually fire when cooldown == 0
+            // This allows holding button for continuous fire
+
+            RETURN success
+        ELSE:
+            // Weapon is semi-automatic
+            // Do nothing (require button release/press)
+            RETURN false
+        END IF
+    END IF
+
+    RETURN false
+END FUNCTION
+
+
+--------------------------------------------------------------------------------
+SECTION 11: VISUAL FEEDBACK SYSTEM
+--------------------------------------------------------------------------------
+
+FUNCTION render_weapon_feedback(gun, screen):
+
+    // Recoil animation
+    vertical_offset = gun.recoil
+    DRAW gun.weapon_image AT (x, y + vertical_offset)
+
+    // Muzzle flash
+    IF gun.flash_duration > 0:
+        flash_alpha = gun.flash_duration / 4.0  // Fade out
+        DRAW gun.muzzle_flash WITH alpha = flash_alpha
+    END IF
+
+    // Ammo display
+    ammo_color = WHITE
+    IF gun.ammo <= 3:
+        ammo_color = RED  // Low ammo warning
+    ELSE IF gun.ammo <= gun.config.max_ammo / 3:
+        ammo_color = YELLOW  // Medium ammo warning
+    END IF
+
+    DRAW TEXT "{gun.ammo} / {gun.config.max_ammo}" WITH color = ammo_color
+
+    // Reload indicator
+    IF gun.reloading:
+        reload_progress = 1.0 - (gun.reload_timer / gun.config.reload_time)
+        DRAW progress_bar WITH progress = reload_progress
+        DRAW TEXT "RELOADING..."
+    END IF
+
+    // Weapon name with highlight
+    IF weapon_recently_switched:
+        DRAW TEXT gun.config.name WITH highlight_effect
+    ELSE:
+        DRAW TEXT gun.config.name
+    END IF
+
+END FUNCTION
+
+
+================================================================================
+END OF PSEUDOCODE DOCUMENT
+================================================================================
